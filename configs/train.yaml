@@ -1,0 +1,9 @@
+epochs: 10
+batch_size: 32
+optimizer: "AdamW"
+lr: 0.001
+weight_decay: 0.0005
+scheduler: "cosine"        # "cosine", "step", "plateau"
+early_stopping_patience: 5
+checkpoint_dir: "checkpoints/"
+log_backend: "none"        # "wandb", "tensorboard", or "none"

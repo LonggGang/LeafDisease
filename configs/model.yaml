@@ -1,0 +1,5 @@
+task: "classification"       # "classification" or "detection"
+architecture: "resnet18"     # exact model variant string
+num_classes: 10              # total disease + healthy classes
+pretrained: true             # use ImageNet weights
+input_size: 224              # image size (square)

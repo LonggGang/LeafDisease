@@ -1,0 +1,13 @@
+train:
+  resize: 224
+  horizontal_flip: 0.5
+  vertical_flip: 0.2
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+  random_crop: false
+  mosaic: 0.0
+val:
+  resize: 224
+  normalize_only: true
