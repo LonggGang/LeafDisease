@@ -102,7 +102,9 @@ class PlantDiseaseDataset(BasePlantDataset):
             label_idx = self.class_to_idx[unified_name]
             class_dir = self.root_dir / raw_class
             
-            for img_path in class_dir.glob("*.*"):
+            # Sort paths to ensure deterministic order across different OS file systems
+            img_paths = sorted(class_dir.glob("*.*"))
+            for img_path in img_paths:
                 if img_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp']:
                     self.samples.append({
                         "path": str(img_path),
