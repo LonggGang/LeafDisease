@@ -2,9 +2,6 @@
 Abstract base class for PyTorch datasets handling plant leaf images.
 """
 import abc
-import os
-import copy
-import random
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -36,46 +33,32 @@ class BasePlantDataset(Dataset, abc.ABC):
 
 class PlantDiseaseDataset(BasePlantDataset):
     """
-    Generalized dataset class that handles taxonomy unification, split isolation,
-    and automated minority class balancing (over-sampling) for training.
+    Pure dataset class that handles file I/O and taxonomy unification.
+    Class balancing is deferred to the DataLoader via WeightedRandomSampler.
     """
     
     def __init__(
         self, 
         root_dir: str, 
-        split: str = "train", 
         transform: Optional[Callable] = None, 
-        class_mapping: Optional[Dict[str, str]] = None,
-        n_train_budget: int = 1000,
-        seed: int = 42
+        class_mapping: Optional[Dict[str, str]] = None
     ):
         """
         Args:
             root_dir: Root directory containing class folders.
-            split: "train", "val", or "test".
             transform: Transformations to apply (from augmentation.py).
             class_mapping: Dictionary to map irregular folder names to unified names.
-            n_train_budget: Target number of samples per class for over-sampling (train split only).
-            seed: Random seed for reproducibility in balancing.
         """
         self.root_dir = Path(root_dir)
-        self.split = split
         self.transform = transform
         self.class_mapping = class_mapping or {}
-        self.n_train_budget = n_train_budget
         
         # Internal state
         self.samples: List[Dict[str, Any]] = []
         self.class_to_idx: Dict[str, int] = {}
         self.classes: List[str] = []
         
-        # Initialize
-        random.seed(seed)
         self.load_annotations()
-        
-        # Apply class balancing strictly to the train split
-        if self.split == "train":
-            self._balance_classes()
             
     def load_annotations(self) -> None:
         """
@@ -109,42 +92,8 @@ class PlantDiseaseDataset(BasePlantDataset):
                     self.samples.append({
                         "path": str(img_path),
                         "label_idx": label_idx,
-                        "unified_name": unified_name,
-                        "is_aug": False # Tracking flag to prevent leakage
+                        "unified_name": unified_name
                     })
-
-    def _balance_classes(self) -> None:
-        """
-        Applies targeted over-sampling to minority classes up to n_train_budget.
-        Strictly confined to the Train split to prevent validation/test leakage.
-        """
-        class_groups: Dict[int, List[Dict[str, Any]]] = {i: [] for i in range(len(self.classes))}
-        
-        for sample in self.samples:
-            class_groups[sample["label_idx"]].append(sample)
-            
-        balanced_samples = []
-        
-        for label_idx, items in class_groups.items():
-            if len(items) == 0:
-                continue # Skip empty classes entirely
-                
-            balanced_samples.extend(items) # Add all real samples
-            
-            # Oversample if under budget
-            num_real = len(items)
-            deficit = self.n_train_budget - num_real
-            
-            if deficit > 0:
-                # Duplicate randomly with replacement
-                for _ in range(deficit):
-                    duplicated_sample = copy.deepcopy(random.choice(items))
-                    duplicated_sample["is_aug"] = True # Flag as artificial pad
-                    balanced_samples.append(duplicated_sample)
-                    
-        self.samples = balanced_samples
-        # Shuffle train set after balancing
-        random.shuffle(self.samples)
 
     def __len__(self) -> int:
         return len(self.samples)
