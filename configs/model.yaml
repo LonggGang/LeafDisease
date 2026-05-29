@@ -1,5 +1,6 @@
-task: "classification"       # "classification" or "detection"
-architecture: "resnet18"     # exact model variant string
-num_classes: 10              # total disease + healthy classes
+task: "detection"            # "classification" or "detection"
+architecture: "yolo_leafnet" # exact model variant string
+num_classes: 11              # total disease + healthy classes
 pretrained: true             # use ImageNet weights
-input_size: 224              # image size (square)
+input_size: 640              # image size (square)
+dropout_rate: 0.5            # dropout rate for C2f_BNDropout layer
