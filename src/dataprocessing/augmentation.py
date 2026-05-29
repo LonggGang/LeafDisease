@@ -29,9 +29,10 @@ class PlantDiseaseTransform(BaseTransform):
     Concrete implementation of image processing and augmentation for plant disease datasets.
     Implements conditional logic based on dataset characteristics (IDADP vs PlantDoc).
     """
-    def __init__(self, dataset_type: str = "PlantDoc", task: str = "classification"):
+    def __init__(self, dataset_type: str = "PlantDoc", task: str = "classification", cfg_aug: dict = None):
         self.dataset_type = dataset_type
         self.task = task
+        self.cfg_aug = cfg_aug or {}
         
         # ImageNet standardization is mathematically standard for most pre-trained CNNs
         self.mean = [0.485, 0.456, 0.406]
@@ -62,11 +63,22 @@ class PlantDiseaseTransform(BaseTransform):
         # 1. Base Structural Resize (to 256)
         transforms_list.append(self._get_base_resize())
         
-        # 2. Spatial Invariance (Random Crop down to 224x224 & Flips)
+        # Extract hyperparameters from config (with defaults)
+        train_cfg = self.cfg_aug.get("train", {})
+        resize_dim = train_cfg.get("resize", 224)
+        h_flip_p = train_cfg.get("horizontal_flip", 0.5)
+        v_flip_p = train_cfg.get("vertical_flip", 0.5)
+        
+        jitter_cfg = train_cfg.get("color_jitter", {})
+        brightness = jitter_cfg.get("brightness", 0.2)
+        contrast = jitter_cfg.get("contrast", 0.2)
+        saturation = jitter_cfg.get("saturation", 0.2)
+
+        # 2. Spatial Invariance (Random Crop down to resize_dim & Flips)
         transforms_list.extend([
-            T.RandomCrop(224),
-            T.RandomHorizontalFlip(p=0.5),
-            T.RandomVerticalFlip(p=0.5),
+            T.RandomCrop(resize_dim),
+            T.RandomHorizontalFlip(p=h_flip_p),
+            T.RandomVerticalFlip(p=v_flip_p),
             T.RandomRotation(degrees=15)
         ])
         
@@ -74,7 +86,7 @@ class PlantDiseaseTransform(BaseTransform):
         # Disable hue jittering for IDADP to preserve specific diagnostic disease colors.
         hue_shift = 0.0 if self.dataset_type.upper() == "IDADP" else 0.1
         transforms_list.append(
-            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=hue_shift)
+            T.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue_shift)
         )
         
         # 4. Tensor Formatting
@@ -95,9 +107,12 @@ class PlantDiseaseTransform(BaseTransform):
         Pure structural preprocessing for Validation/Test/Inference (No augmentation).
         Safe for Mobile/IoT deployment edge inference.
         """
+        val_cfg = self.cfg_aug.get("val", {})
+        resize_dim = val_cfg.get("resize", 224)
+        
         transforms_list = [
             self._get_base_resize(),
-            T.CenterCrop(224), # Deterministic center crop for evaluation
+            T.CenterCrop(resize_dim), # Deterministic center crop for evaluation
             T.ToTensor(),
             T.Normalize(mean=self.mean, std=self.std)
         ]
