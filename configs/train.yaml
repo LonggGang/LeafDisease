@@ -1,3 +1,4 @@
+data: "data/dataset.yaml"        # Path to standard YOLO dataset.yaml config
 epochs: 10
 batch_size: 32
 optimizer: "AdamW"

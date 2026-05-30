@@ -91,10 +91,26 @@ class YOLOLeafNetDetector(BaseDetector):
 
     def _build_yolo_model(self) -> YOLO:
         """
-        Dynamically configures and builds the YOLOv8-LeafNet model.
-        Loads pretrained weights partially from yolov8s.pt and replaces
-        layer 8 with our custom C2f_BNDropout.
+        Dynamically configures and builds the YOLOv8 model.
+        If architecture is 'yolo_leafnet', it builds a customized YOLOv8s backbone
+        and injects custom C2f_BNDropout at layer 8.
+        Otherwise, it instantiates standard YOLO models (e.g., yolov8s, yolov8n).
         """
+        arch = self.cfg.get("architecture", "yolo_leafnet")
+        
+        if arch != "yolo_leafnet":
+            logger.info(f"Building standard YOLO model: {arch}")
+            # Ensure model weight file name matches format expected by Ultralytics
+            if not (arch.endswith(".yaml") or arch.endswith(".pt")):
+                # Check if we should load pretrained or random weights config
+                model_str = f"{arch}.pt" if self.pretrained else f"{arch}.yaml"
+            else:
+                model_str = arch
+                
+            model = YOLO(model_str)
+            return model
+
+        # Logic for customized yolo_leafnet
         # Read the template yolo_leafnet configuration
         arch_config_path = "configs/yolo_leafnet.yaml"
         if not os.path.exists(arch_config_path):
@@ -108,21 +124,16 @@ class YOLOLeafNetDetector(BaseDetector):
 
         # Create checkpoints dir if not exists
         os.makedirs("checkpoints", exist_ok=True)
-        temp_yaml_path = "checkpoints/yolo_leafnet_temp.yaml"
+        config_path = "checkpoints/yolo_leafnet_config.yaml"
         
-        with open(temp_yaml_path, "w", encoding="utf-8") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(yolo_cfg, f)
             
-        logger.info(f"Wrote temporary configuration to {temp_yaml_path}")
+        logger.info(f"Wrote configuration to {config_path}")
 
         # Initialize the model structure with standard C2f at layer 8
-        model = YOLO(temp_yaml_path)
-
-        # Clean up temporary configuration file
-        try:
-            os.remove(temp_yaml_path)
-        except Exception as e:
-            logger.warning(f"Could not remove temporary config file: {e}")
+        # Keep this config file persistent so the trainer can reload it during setup.
+        model = YOLO(config_path)
 
         # Load pretrained weights from yolov8s.pt if requested (prior to replacing layer 8)
         if self.pretrained:

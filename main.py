@@ -62,6 +62,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to the data augmentation configuration YAML file"
     )
     parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="Path to the standard YOLO dataset.yaml config file (overrides train config)"
+    )
+    parser.add_argument(
         "--image_path",
         type=str,
         default=None,
@@ -73,6 +79,61 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to the model checkpoint file (.pth) to load for evaluation or prediction"
     )
+    # CLI Overrides for model & training
+    parser.add_argument(
+        "--architecture",
+        type=str,
+        default=None,
+        help="Override model architecture (e.g. yolov8n, yolov8s, yolo_leafnet)"
+    )
+    parser.add_argument(
+        "--num_classes",
+        type=int,
+        default=None,
+        help="Override number of classes"
+    )
+    parser.add_argument(
+        "--pretrained",
+        type=str,
+        default=None,
+        help="Override pretrained flag ('true' or 'false')"
+    )
+    parser.add_argument(
+        "--input_size",
+        type=int,
+        default=None,
+        help="Override model input image size (imgsz)"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Override training epochs"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Override training batch size"
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Override learning rate"
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default=None,
+        help="Override optimizer (e.g. AdamW, SGD)"
+    )
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        default=None,
+        help="Override checkpoint directory"
+    )
     return parser.parse_args()
 
 
@@ -82,107 +143,190 @@ def run_pipeline(args: argparse.Namespace) -> None:
     cfg_train = load_config(args.train_cfg)
     cfg_aug = load_config(args.augment_cfg)
 
+    # Apply CLI overrides to model and training configs
+    if args.architecture:
+        cfg_model["architecture"] = args.architecture
+    if args.num_classes is not None:
+        cfg_model["num_classes"] = args.num_classes
+    if args.pretrained is not None:
+        cfg_model["pretrained"] = args.pretrained.lower() in ("true", "1", "yes")
+    if args.input_size is not None:
+        cfg_model["input_size"] = args.input_size
+
+    if args.epochs is not None:
+        cfg_train["epochs"] = args.epochs
+    if args.batch_size is not None:
+        cfg_train["batch_size"] = args.batch_size
+    if args.lr is not None:
+        cfg_train["lr"] = args.lr
+    if args.optimizer:
+        cfg_train["optimizer"] = args.optimizer
+    if args.checkpoint_dir:
+        cfg_train["checkpoint_dir"] = args.checkpoint_dir
+
     # Đảm bảo thư mục lưu checkpoint tồn tại
     checkpoint_dir = cfg_train.get("checkpoint_dir", "checkpoints/")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # 2. Xử lý logic theo chế độ chạy (Mode)
-    if args.mode == "train":
-        logger.info("Starting TRAINING mode...")
+    task = cfg_model.get("task", "classification")
 
-        # Import các modules từ src (sẽ ném lỗi nếu chưa được implement concrete class)
-        try:
-            # Nhắc nhở người dùng nếu chưa triển khai cụ thể các class
-            from src.dataprocessing.augmentation import BaseTransform
-            from src.dataprocessing.dataset import BasePlantDataset
-            from src.training.trainer import BaseTrainer
-            # Lưu ý: Khi người dùng code cụ thể, các import này sẽ là các class concrete như:
-            # from src.dataprocessing.augmentation import PlantAugmentation
-            # from src.dataprocessing.dataset import PotatoLeafDataset
-            # from src.training.trainer import PlantTrainer
-            # và import hàm factory build_model
-            # from src.architectures import build_model
-        except ImportError as e:
-            logger.error(f"Failed to import src modules. Have they been implemented yet? Details: {e}")
-            raise
+    if task == "detection":
+        if args.mode == "train":
+            logger.info("Starting DETECTION TRAINING mode...")
 
-        logger.info("Building data augmentation and datasets...")
-        # Minh họa luồng dữ liệu:
-        # train_transforms = PlantAugmentation(cfg_aug, split="train")
-        # val_transforms = PlantAugmentation(cfg_aug, split="val")
-        #
-        # train_dataset = PotatoLeafDataset(csv_path="data/splits/train.csv", transforms=train_transforms)
-        # val_dataset = PotatoLeafDataset(csv_path="data/splits/val.csv", transforms=val_transforms)
-        #
-        # train_loader = DataLoader(train_dataset, batch_size=cfg_train["batch_size"], shuffle=True)
-        # val_loader = DataLoader(val_dataset, batch_size=cfg_train["batch_size"], shuffle=False)
-        #
-        # logger.info(f"Building model: {cfg_model['architecture']}")
-        # model = build_model(cfg_model)
-        #
-        # trainer = PlantTrainer(model, train_loader, val_loader, cfg_train)
-        # trainer.run()
-        
-        logger.warning(
-            "Triển khai giả lập thành công! Hãy cài đặt cụ thể các lớp kế thừa "
-            "trong thư mục `src/` trước khi tiến hành chạy huấn luyện thực tế."
-        )
+            from src.architectures import build_model
+            from src.training import YOLOLeafNetTrainer
 
-    elif args.mode == "eval":
-        logger.info("Starting EVALUATION mode...")
-        if not args.checkpoint:
-            logger.warning("No checkpoint provided via --checkpoint. Evaluation might run on random weights!")
+            data_path = args.data or cfg_train.get("data", "data/dataset.yaml")
+            logger.info(f"Building detection model: {cfg_model['architecture']}")
+            model = build_model(cfg_model)
 
-        try:
-            from src.training.evaluator import BaseEvaluator
-            # Concrete implementation:
-            # from src.training.evaluator import PlantEvaluator
-            # from src.architectures import build_model
-        except ImportError as e:
-            logger.error(f"Failed to import evaluator modules. Details: {e}")
-            raise
+            trainer = YOLOLeafNetTrainer(model, cfg_train, data_path=data_path)
+            trainer.run()
 
-        # Minh họa luồng đánh giá:
-        # test_transforms = PlantAugmentation(cfg_aug, split="val")
-        # test_dataset = PotatoLeafDataset(csv_path="data/splits/test.csv", transforms=test_transforms)
-        # test_loader = DataLoader(test_dataset, batch_size=cfg_train["batch_size"], shuffle=False)
-        #
-        # model = build_model(cfg_model)
-        # if args.checkpoint:
-        #     model.load_state_dict(torch.load(args.checkpoint, map_location="cpu"))
-        #
-        # evaluator = PlantEvaluator(model, test_loader)
-        # results = evaluator.evaluate()
-        # logger.info(f"Evaluation Results: {results}")
+        elif args.mode == "eval":
+            logger.info("Starting DETECTION EVALUATION mode...")
 
-        logger.warning("Đã phác thảo luồng Evaluation. Hãy triển khai lớp Evaluator cụ thể để chạy.")
+            from src.architectures import build_model
+            from src.training import YOLOLeafNetEvaluator
 
-    elif args.mode == "predict":
-        logger.info("Starting PREDICTION mode...")
-        if not args.image_path:
-            raise ValueError("You must specify --image_path in predict mode.")
-        if not args.checkpoint:
-            logger.warning("No checkpoint provided via --checkpoint. Model will run using default weights.")
+            data_path = args.data or cfg_train.get("data", "data/dataset.yaml")
+            logger.info(f"Building detection model: {cfg_model['architecture']}")
+            model = build_model(cfg_model)
 
-        try:
-            # Concrete model build
-            # from src.architectures import build_model
-            pass
-        except ImportError as e:
-            logger.error(f"Failed to import model building factory. Details: {e}")
-            raise
+            if args.checkpoint:
+                logger.info(f"Loading checkpoint from {args.checkpoint}...")
+                if args.checkpoint.endswith(".pt"):
+                    try:
+                        from ultralytics import YOLO
+                        model.model = YOLO(args.checkpoint)
+                        logger.info("Successfully loaded native YOLO checkpoint.")
+                    except Exception as e:
+                        logger.warning(f"Could not load native YOLO checkpoint: {e}. Trying state dict loading.")
+                        state_dict = torch.load(args.checkpoint, map_location="cpu")
+                        if isinstance(state_dict, dict) and "model" in state_dict:
+                            state_dict = state_dict["model"]
+                        model.model.model.load_state_dict(state_dict, strict=False)
+                else:
+                    state_dict = torch.load(args.checkpoint, map_location="cpu")
+                    if isinstance(state_dict, dict) and "model" in state_dict:
+                        state_dict = state_dict["model"]
+                    model.model.model.load_state_dict(state_dict, strict=False)
+                    logger.info("Successfully loaded state dict checkpoint.")
+            else:
+                logger.warning("No checkpoint provided via --checkpoint. Evaluation might run on random/default weights!")
 
-        logger.info(f"Running inference on image: {args.image_path}")
-        # Minh họa luồng dự đoán ảnh đơn lẻ:
-        # model = build_model(cfg_model)
-        # if args.checkpoint:
-        #     model.load_state_dict(torch.load(args.checkpoint, map_location="cpu"))
-        # model.eval()
-        #
-        # output = model.predict(args.image_path)
-        # logger.info(f"Prediction output: {output}")
+            evaluator = YOLOLeafNetEvaluator(model, data_path=data_path, split="val")
+            results = evaluator.evaluate()
+            logger.info(f"Evaluation Results: {results}")
 
-        logger.warning("Đã phác thảo luồng Predict. Hãy hoàn thiện model.predict() để lấy dự đoán của ảnh.")
+        elif args.mode == "predict":
+            logger.info("Starting DETECTION PREDICTION mode...")
+            if not args.image_path:
+                raise ValueError("You must specify --image_path in predict mode.")
+
+            from src.architectures import build_model
+            model = build_model(cfg_model)
+
+            if args.checkpoint:
+                logger.info(f"Loading checkpoint from {args.checkpoint}...")
+                if args.checkpoint.endswith(".pt"):
+                    try:
+                        from ultralytics import YOLO
+                        model.model = YOLO(args.checkpoint)
+                        logger.info("Successfully loaded native YOLO checkpoint.")
+                    except Exception as e:
+                        logger.warning(f"Could not load native YOLO checkpoint: {e}. Trying state dict loading.")
+                        state_dict = torch.load(args.checkpoint, map_location="cpu")
+                        if isinstance(state_dict, dict) and "model" in state_dict:
+                            state_dict = state_dict["model"]
+                        model.model.model.load_state_dict(state_dict, strict=False)
+                else:
+                    state_dict = torch.load(args.checkpoint, map_location="cpu")
+                    if isinstance(state_dict, dict) and "model" in state_dict:
+                        state_dict = state_dict["model"]
+                    model.model.model.load_state_dict(state_dict, strict=False)
+                    logger.info("Successfully loaded state dict checkpoint.")
+            else:
+                logger.warning("No checkpoint provided via --checkpoint. Model will run using default weights.")
+
+            logger.info(f"Running inference on image: {args.image_path}")
+            output = model.predict(args.image_path)
+            logger.info(f"Prediction output: {output}")
+
+    elif task == "classification":
+        data_path = args.data or cfg_train.get("data", "data/")
+        # If a dataset YAML file is passed, extract the root directory path
+        if data_path.endswith(".yaml") or data_path.endswith(".yml"):
+            try:
+                import yaml
+                with open(data_path, "r", encoding="utf-8") as f:
+                    yaml_data = yaml.safe_load(f)
+                if yaml_data and "path" in yaml_data:
+                    data_path = yaml_data["path"]
+                    logger.info(f"Parsed classification root directory from YAML: {data_path}")
+            except Exception as e:
+                logger.warning(f"Could not parse YAML for classification path: {e}. Using raw path: {data_path}")
+
+        if args.mode == "train":
+            logger.info("Starting CLASSIFICATION TRAINING mode...")
+
+            from src.architectures import build_model
+            from src.training import CNNClassifierTrainer
+
+            logger.info(f"Building classification model: {cfg_model['architecture']}")
+            model = build_model(cfg_model)
+
+            trainer = CNNClassifierTrainer(model, cfg_train, data_path=data_path, cfg_aug=cfg_aug)
+            trainer.run()
+
+        elif args.mode == "eval":
+            logger.info("Starting CLASSIFICATION EVALUATION mode...")
+
+            from src.architectures import build_model
+            from src.training import CNNClassifierEvaluator
+
+            logger.info(f"Building classification model: {cfg_model['architecture']}")
+            model = build_model(cfg_model)
+
+            if args.checkpoint:
+                logger.info(f"Loading checkpoint from {args.checkpoint}...")
+                checkpoint_data = torch.load(args.checkpoint, map_location="cpu")
+                if isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
+                    model.load_state_dict(checkpoint_data["model_state_dict"])
+                else:
+                    model.load_state_dict(checkpoint_data)
+                logger.info("Successfully loaded classifier checkpoint.")
+            else:
+                logger.warning("No checkpoint provided via --checkpoint. Evaluation will run on random/default weights!")
+
+            evaluator = CNNClassifierEvaluator(model, data_path=data_path, split="val")
+            results = evaluator.evaluate()
+            logger.info(f"Evaluation Results: {results}")
+
+        elif args.mode == "predict":
+            logger.info("Starting CLASSIFICATION PREDICTION mode...")
+            if not args.image_path:
+                raise ValueError("You must specify --image_path in predict mode.")
+
+            from src.architectures import build_model
+            model = build_model(cfg_model)
+
+            if args.checkpoint:
+                logger.info(f"Loading checkpoint from {args.checkpoint}...")
+                checkpoint_data = torch.load(args.checkpoint, map_location="cpu")
+                if isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
+                    model.load_state_dict(checkpoint_data["model_state_dict"])
+                else:
+                    model.load_state_dict(checkpoint_data)
+                logger.info("Successfully loaded classifier checkpoint.")
+            else:
+                logger.warning("No checkpoint provided via --checkpoint. Model will run using default weights.")
+
+            logger.info(f"Running inference on image: {args.image_path}")
+            output = model.predict(args.image_path)
+            logger.info(f"Prediction output: {output}")
 
 
 def main():

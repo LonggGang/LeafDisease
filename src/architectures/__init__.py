@@ -18,12 +18,17 @@ def build_model(cfg: Dict[str, Any]) -> BaseModel:
     arch = cfg.get("architecture", "")
 
     if task == "detection":
-        if arch == "yolo_leafnet":
+        # Support both customized yolo_leafnet and standard YOLO variants
+        if arch == "yolo_leafnet" or "yolo" in arch.lower():
             from src.architectures.detectors.yolo_leafnet import YOLOLeafNetDetector
             return YOLOLeafNetDetector(cfg)
         else:
             raise ValueError(f"Unknown detection architecture: {arch}")
     elif task == "classification":
-        raise NotImplementedError("Classification architectures are not implemented yet in the factory.")
+        if arch == "advanced_cnn":
+            from src.architectures.classifiers.advanced_cnn_classifier import _register_classifier
+            return _register_classifier(cfg)
+        else:
+            raise ValueError(f"Unknown classification architecture: {arch}")
     else:
         raise ValueError(f"Unknown task: {task}. Must be 'classification' or 'detection'.")
