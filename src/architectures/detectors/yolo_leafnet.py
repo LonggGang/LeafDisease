@@ -144,8 +144,14 @@ class YOLOLeafNetDetector(BaseDetector):
                 pretrained_dict = standard_model.model.state_dict()
                 
                 # Load weights into the model. Since layer 8 is still standard C2f, it matches yolov8s structure.
-                model.model.load_state_dict(pretrained_dict, strict=False)
-                logger.info("Successfully loaded pretrained yolov8s weights.")
+                # Filter out parameters with size mismatch (like the detection head)
+                model_dict = model.model.state_dict()
+                filtered_dict = {
+                    k: v for k, v in pretrained_dict.items()
+                    if k in model_dict and v.shape == model_dict[k].shape
+                }
+                model.model.load_state_dict(filtered_dict, strict=False)
+                logger.info("Successfully loaded pretrained yolov8s weights (excluding mismatched head layers).")
             except Exception as e:
                 logger.warning(
                     f"Could not load pretrained weights from yolov8s.pt: {e}. "
