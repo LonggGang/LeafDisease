@@ -81,6 +81,13 @@ def parse_args() -> argparse.Namespace:
     )
     # CLI Overrides for model & training
     parser.add_argument(
+        "--task",
+        type=str,
+        default=None,
+        choices=["classification", "detection"],
+        help="Override project task type ('classification' or 'detection')"
+    )
+    parser.add_argument(
         "--architecture",
         type=str,
         default=None,
@@ -134,6 +141,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override checkpoint directory"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from the checkpoint specified by --checkpoint"
+    )
     return parser.parse_args()
 
 
@@ -144,6 +156,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
     cfg_aug = load_config(args.augment_cfg)
 
     # Apply CLI overrides to model and training configs
+    if args.task:
+        cfg_model["task"] = args.task
     if args.architecture:
         cfg_model["architecture"] = args.architecture
     if args.num_classes is not None:
@@ -163,6 +177,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         cfg_train["optimizer"] = args.optimizer
     if args.checkpoint_dir:
         cfg_train["checkpoint_dir"] = args.checkpoint_dir
+    if args.resume:
+        cfg_train["resume"] = True
 
     # Đảm bảo thư mục lưu checkpoint tồn tại
     checkpoint_dir = cfg_train.get("checkpoint_dir", "checkpoints/")
@@ -181,6 +197,31 @@ def run_pipeline(args: argparse.Namespace) -> None:
             data_path = args.data or cfg_train.get("data", "data/dataset.yaml")
             logger.info(f"Building detection model: {cfg_model['architecture']}")
             model = build_model(cfg_model)
+
+            if args.checkpoint:
+                if args.resume:
+                    logger.info(f"Resuming detection training from checkpoint: {args.checkpoint}")
+                    from ultralytics import YOLO
+                    model.model = YOLO(args.checkpoint)
+                else:
+                    logger.info(f"Loading weights from checkpoint {args.checkpoint} to initialize new training/fine-tuning run...")
+                    if args.checkpoint.endswith(".pt"):
+                        try:
+                            from ultralytics import YOLO
+                            model.model = YOLO(args.checkpoint)
+                            logger.info("Successfully loaded native YOLO checkpoint weights.")
+                        except Exception as e:
+                            logger.warning(f"Could not load native YOLO checkpoint: {e}. Trying state dict loading.")
+                            state_dict = torch.load(args.checkpoint, map_location="cpu")
+                            if isinstance(state_dict, dict) and "model" in state_dict:
+                                state_dict = state_dict["model"]
+                            model.model.model.load_state_dict(state_dict, strict=False)
+                    else:
+                        state_dict = torch.load(args.checkpoint, map_location="cpu")
+                        if isinstance(state_dict, dict) and "model" in state_dict:
+                            state_dict = state_dict["model"]
+                        model.model.model.load_state_dict(state_dict, strict=False)
+                        logger.info("Successfully loaded state dict weights.")
 
             trainer = YOLOLeafNetTrainer(model, cfg_train, data_path=data_path)
             trainer.run()
@@ -277,6 +318,15 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
             logger.info(f"Building classification model: {cfg_model['architecture']}")
             model = build_model(cfg_model)
+
+            if args.checkpoint:
+                logger.info(f"Loading weights from checkpoint {args.checkpoint} to initialize new training/fine-tuning run...")
+                checkpoint_data = torch.load(args.checkpoint, map_location="cpu")
+                if isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
+                    model.load_state_dict(checkpoint_data["model_state_dict"])
+                else:
+                    model.load_state_dict(checkpoint_data)
+                logger.info("Successfully loaded classifier weights.")
 
             trainer = CNNClassifierTrainer(model, cfg_train, data_path=data_path, cfg_aug=cfg_aug)
             trainer.run()

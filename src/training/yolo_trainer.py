@@ -115,7 +115,8 @@ class YOLOLeafNetTrainer(BaseTrainer):
             name="yolo_leafnet",
             device=self.get_device_string(),
             exist_ok=True,
-            val=True
+            val=True,
+            resume=self.cfg_train.get("resume", False)
         )
         
         logger.info("Training process completed successfully.")
