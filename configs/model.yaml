@@ -3,4 +3,4 @@ architecture: "yolo_leafnet" # exact model variant string
 num_classes: 11              # total disease + healthy classes
 pretrained: true             # use ImageNet weights
 input_size: 640              # image size (square)
-dropout_rate: 0.5            # dropout rate for C2f_BNDropout layer
+dropout_rate: 0.3            # dropout rate for C2f_BNDropout layer
