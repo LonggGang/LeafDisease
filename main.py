@@ -40,8 +40,8 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         type=str,
         required=True,
-        choices=["train", "eval", "predict"],
-        help="Pipeline execution mode: 'train', 'eval' (evaluate on test set), or 'predict' (single image inference)"
+        choices=["train", "eval", "predict", "crop"],
+        help="Pipeline execution mode: 'train', 'eval' (evaluate on test set), 'predict' (single image inference), or 'crop' (to crop YOLO dataset for classification)"
     )
     parser.add_argument(
         "--model_cfg",
@@ -78,6 +78,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to the model checkpoint file (.pth) to load for evaluation or prediction"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory path for cropped classification dataset (required in 'crop' mode)"
     )
     # CLI Overrides for model & training
     parser.add_argument(
@@ -150,6 +156,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    # Handle crop mode directly before loading configs
+    if args.mode == "crop":
+        if not args.data:
+            raise ValueError("You must specify --data (path to data.yaml) in crop mode.")
+        if not args.output_dir:
+            raise ValueError("You must specify --output_dir (output path for cropped dataset) in crop mode.")
+        
+        logger.info(f"Starting dataset cropping: source={args.data}, target={args.output_dir}")
+        from src.dataprocessing.crop_dataset import crop_yolo_dataset
+        crop_yolo_dataset(args.data, args.output_dir)
+        return
+
     # 1. Load configurations
     cfg_model = load_config(args.model_cfg)
     cfg_train = load_config(args.train_cfg)
