@@ -46,9 +46,15 @@ class CNNClassifierEvaluator(BaseEvaluator):
         # Determine subset dir
         subset_dir = self.data_path
         if self.split in ["val", "test", "train"]:
-            candidate_dir = os.path.join(self.data_path, self.split)
-            if os.path.isdir(candidate_dir):
-                subset_dir = candidate_dir
+            candidates = [self.split]
+            if self.split == "val":
+                candidates.extend(["validation", "valid"])
+            
+            for cand in candidates:
+                candidate_dir = os.path.join(self.data_path, cand)
+                if os.path.isdir(candidate_dir):
+                    subset_dir = candidate_dir
+                    break
 
         # Build transform
         dataset_type = getattr(self.model, "dataset_type", "PlantDoc")

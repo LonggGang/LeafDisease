@@ -322,11 +322,25 @@ def run_pipeline(args: argparse.Namespace) -> None:
             if args.checkpoint:
                 logger.info(f"Loading weights from checkpoint {args.checkpoint} to initialize new training/fine-tuning run...")
                 checkpoint_data = torch.load(args.checkpoint, map_location="cpu")
+                
                 if isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
-                    model.load_state_dict(checkpoint_data["model_state_dict"])
+                    state_dict = checkpoint_data["model_state_dict"]
                 else:
-                    model.load_state_dict(checkpoint_data)
-                logger.info("Successfully loaded classifier weights.")
+                    state_dict = checkpoint_data
+                
+                # Tự động loại bỏ layer classifier cuối cùng nếu số lượng class khác nhau
+                if "classifier.weight" in state_dict:
+                    ckpt_classes = state_dict["classifier.weight"].shape[0]
+                    model_classes = model.classifier.weight.shape[0]
+                    if ckpt_classes != model_classes:
+                        logger.info(f"Class mismatch detected: checkpoint has {ckpt_classes} classes, "
+                                    f"but model has {model_classes} classes. Dropping classifier head weights for transfer learning.")
+                        state_dict.pop("classifier.weight", None)
+                        state_dict.pop("classifier.bias", None)
+                
+                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+                logger.info(f"Successfully loaded classifier weights (strict=False). "
+                            f"Missing keys: {len(missing_keys)}, Unexpected keys: {len(unexpected_keys)}")
 
             trainer = CNNClassifierTrainer(model, cfg_train, data_path=data_path, cfg_aug=cfg_aug)
             trainer.run()

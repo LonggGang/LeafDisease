@@ -67,6 +67,8 @@ class CNNClassifierTrainer(BaseTrainer):
         val_dir = os.path.join(self.data_path, "val")
         if not os.path.isdir(val_dir):
             val_dir = os.path.join(self.data_path, "validation")
+        if not os.path.isdir(val_dir):
+            val_dir = os.path.join(self.data_path, "valid")
 
         # Build transforms
         # Determine dataset type from model config (default: PlantDoc)
