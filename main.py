@@ -170,6 +170,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Resume training from the checkpoint specified by --checkpoint"
     )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val",
+        choices=["train", "val", "valid", "test"],
+        help="Dataset split to evaluate on (default: 'val')"
+    )
     return parser.parse_args()
 
 
@@ -300,7 +307,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             else:
                 logger.warning("No checkpoint provided via --checkpoint. Evaluation might run on random/default weights!")
 
-            evaluator = YOLOLeafNetEvaluator(model, data_path=data_path, split="val")
+            evaluator = YOLOLeafNetEvaluator(model, data_path=data_path, split=args.split)
             results = evaluator.evaluate()
             logger.info(f"Evaluation Results: {results}")
 
@@ -407,7 +414,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             else:
                 logger.warning("No checkpoint provided via --checkpoint. Evaluation will run on random/default weights!")
 
-            evaluator = CNNClassifierEvaluator(model, data_path=data_path, split="val")
+            evaluator = CNNClassifierEvaluator(model, data_path=data_path, split=args.split)
             results = evaluator.evaluate()
             logger.info(f"Evaluation Results: {results}")
 
