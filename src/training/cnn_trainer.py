@@ -151,22 +151,49 @@ class CNNClassifierTrainer(BaseTrainer):
         lr = self.cfg_train.get("lr", 0.001)
         wd = self.cfg_train.get("weight_decay", 0.0005)
 
-        # Filter out frozen parameters (e.g. from frozen backbone)
-        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        # Check if backbone parameters are trainable (for discriminative learning rates)
+        backbone_trainable = False
+        if hasattr(self.model, "backbone"):
+            backbone_trainable = any(p.requires_grad for p in self.model.backbone.parameters())
+
+        if backbone_trainable:
+            unfreeze_lr = self.cfg_train.get("unfreeze_lr", lr / 10.0)
+            logger.info(f"Building optimizer with discriminative learning rates: backbone_lr={unfreeze_lr:.6f}, head_lr={lr:.6f}")
+            
+            backbone_params = []
+            head_params = []
+            
+            backbone_param_ids = set(id(p) for p in self.model.backbone.parameters())
+            
+            for p in self.model.parameters():
+                if p.requires_grad:
+                    if id(p) in backbone_param_ids:
+                        backbone_params.append(p)
+                    else:
+                        head_params.append(p)
+            
+            param_groups = [
+                {"params": backbone_params, "lr": unfreeze_lr},
+                {"params": head_params, "lr": lr}
+            ]
+        else:
+            # Standard single group optimizer
+            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+            param_groups = [{"params": trainable_params, "lr": lr}]
 
         if opt_name == "SGD":
-            return torch.optim.SGD(trainable_params, lr=lr, weight_decay=wd, momentum=0.9)
+            return torch.optim.SGD(param_groups, weight_decay=wd, momentum=0.9)
         elif opt_name == "ADAM":
-            return torch.optim.Adam(trainable_params, lr=lr, weight_decay=wd)
+            return torch.optim.Adam(param_groups, weight_decay=wd)
         else:
-            return torch.optim.AdamW(trainable_params, lr=lr, weight_decay=wd)
+            return torch.optim.AdamW(param_groups, weight_decay=wd)
 
-    def _build_scheduler(self) -> Optional[Any]:
+    def _build_scheduler(self, epochs: Optional[int] = None) -> Optional[Any]:
         sched_name = self.cfg_train.get("scheduler", "cosine").lower()
-        epochs = self.cfg_train.get("epochs", 10)
+        t_max = epochs if epochs is not None else self.cfg_train.get("epochs", 10)
         
         if sched_name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=t_max)
         elif sched_name == "plateau":
             return torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="max", patience=3)
         return None
@@ -227,12 +254,34 @@ class CNNClassifierTrainer(BaseTrainer):
         checkpoint_dir = self.cfg_train.get("checkpoint_dir", "checkpoints/")
         patience = self.cfg_train.get("early_stopping_patience", 5)
         
+        # Check dynamic unfreezing settings
+        unfreeze_epoch = self.cfg_train.get("unfreeze_epoch", None)
+        unfreeze_layers = self.cfg_train.get("unfreeze_layers", 30)
+        has_unfrozen = False
+        
         logger.info(f"Starting classification training on {self.device} for {epochs} epochs...")
+        if unfreeze_epoch is not None:
+            logger.info(f"Dynamic unfreezing scheduled at Epoch {unfreeze_epoch} (unfreeze {unfreeze_layers} layers).")
         
         best_epoch = 0
         no_improvement_epochs = 0
 
         for epoch in range(1, epochs + 1):
+            # Check and trigger dynamic unfreezing
+            if unfreeze_epoch is not None and epoch >= unfreeze_epoch and not has_unfrozen:
+                if hasattr(self.model, "unfreeze_backbone"):
+                    logger.info(f"--- Epoch {epoch}: Dynamic Unfreezing Triggered ---")
+                    self.model.unfreeze_backbone(unfreeze_layers)
+                    
+                    # Rebuild optimizer to include the now-trainable backbone parameters
+                    self.optimizer = self._build_optimizer()
+                    
+                    # Rebuild scheduler for the remaining epochs
+                    remaining_epochs = epochs - epoch + 1
+                    self.scheduler = self._build_scheduler(remaining_epochs)
+                    
+                    has_unfrozen = True
+
             t0 = time.time()
             train_metrics = self.train_one_epoch()
             val_metrics = self.validate()

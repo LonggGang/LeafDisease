@@ -148,6 +148,24 @@ def parse_args() -> argparse.Namespace:
         help="Override checkpoint directory"
     )
     parser.add_argument(
+        "--unfreeze_epoch",
+        type=int,
+        default=None,
+        help="Epoch at which to unfreeze the model backbone (e.g. 5)"
+    )
+    parser.add_argument(
+        "--unfreeze_layers",
+        type=int,
+        default=None,
+        help="Number of backbone layers to unfreeze"
+    )
+    parser.add_argument(
+        "--unfreeze_lr",
+        type=float,
+        default=None,
+        help="Learning rate for the unfrozen backbone parameters"
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Resume training from the checkpoint specified by --checkpoint"
@@ -195,6 +213,12 @@ def run_pipeline(args: argparse.Namespace) -> None:
         cfg_train["optimizer"] = args.optimizer
     if args.checkpoint_dir:
         cfg_train["checkpoint_dir"] = args.checkpoint_dir
+    if args.unfreeze_epoch is not None:
+        cfg_train["unfreeze_epoch"] = args.unfreeze_epoch
+    if args.unfreeze_layers is not None:
+        cfg_train["unfreeze_layers"] = args.unfreeze_layers
+    if args.unfreeze_lr is not None:
+        cfg_train["unfreeze_lr"] = args.unfreeze_lr
     if args.resume:
         cfg_train["resume"] = True
 
