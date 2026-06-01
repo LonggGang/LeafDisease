@@ -57,11 +57,23 @@ class DepthwiseSeparableBlock(nn.Module):
 
 class V2PlantNet(nn.Module, BaseClassifier):
 
-    def __init__(self, num_classes: int, class_map: Dict[int, str]):
+    def __init__(self, cfg_or_num_classes: Any = 38, class_map: Optional[Dict[int, str]] = None):
         super().__init__()
 
-        self.class_map = class_map
-        self.input_size = 224
+        if isinstance(cfg_or_num_classes, dict):
+            cfg = cfg_or_num_classes
+            self.num_classes = cfg.get("num_classes", 38)
+            self.class_names = cfg.get("class_names", [])
+            if self.class_names:
+                self.class_map = {i: name for i, name in enumerate(self.class_names)}
+            else:
+                self.class_map = {i: f"class_{i}" for i in range(self.num_classes)}
+            self.input_size = cfg.get("input_size", 224)
+        else:
+            self.num_classes = cfg_or_num_classes
+            self.class_map = class_map or {i: f"class_{i}" for i in range(self.num_classes)}
+            self.class_names = [self.class_map[i] for i in sorted(self.class_map.keys())]
+            self.input_size = 224
         # Initial layers
         self.stem = nn.Sequential(
             nn.Conv2d(
@@ -116,7 +128,7 @@ class V2PlantNet(nn.Module, BaseClassifier):
 
             nn.Dropout(0.45),
 
-            nn.Linear(256, num_classes)
+            nn.Linear(256, self.num_classes)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -142,10 +154,15 @@ class V2PlantNet(nn.Module, BaseClassifier):
         return probs, class_idx, confidence
 
     def map_index_to_label(self, class_idx: int) -> str:
-
-        return self.class_map[class_idx]
+        if self.class_names and class_idx < len(self.class_names):
+            return self.class_names[class_idx]
+        if self.class_map and class_idx in self.class_map:
+            return self.class_map[class_idx]
+        return str(class_idx)
 
     def predict(self, image_path: str):
+        self.eval()
+        device = next(self.parameters()).device
 
         transform = T.Compose([
             T.Resize((self.input_size, self.input_size)),
@@ -153,10 +170,7 @@ class V2PlantNet(nn.Module, BaseClassifier):
         ])
 
         image = Image.open(image_path).convert("RGB")
-
-        tensor = transform(image).unsqueeze(0)
-
-        self.eval()
+        tensor = transform(image).unsqueeze(0).to(device)
 
         start = time.perf_counter()
 
@@ -165,18 +179,21 @@ class V2PlantNet(nn.Module, BaseClassifier):
 
         inference_ms = (time.perf_counter() - start) * 1000
 
-        _, class_idx, confidence = self.postprocess_logits(logits)
+        _, class_idx, confidence = self.postprocess_logits(logits.cpu())
 
         label = self.map_index_to_label(class_idx.item())
 
         return {
             "label": label,
-            "confidence": confidence,
+            "confidence": confidence.item() if isinstance(confidence, torch.Tensor) else float(confidence),
             "boxes": None,
             "inference_ms": inference_ms
-      }
+        }
+
     def get_complexity(self) -> Dict[str, float]:
         self.eval()
+        device = next(self.parameters()).device
+        
         # Parameter count
         params = sum(
             p.numel()
@@ -186,7 +203,7 @@ class V2PlantNet(nn.Module, BaseClassifier):
         params_M = params / 1_000_000
 
         # Dummy input
-        dummy = torch.randn(1, 3, self.input_size, self.input_size)
+        dummy = torch.randn(1, 3, self.input_size, self.input_size).to(device)
 
         # FLOPs calculation
         flops, _ = profile(
@@ -201,12 +218,19 @@ class V2PlantNet(nn.Module, BaseClassifier):
             "params_M": round(params_M, 3),
             "flops_G": round(flops_G, 6)
         }
+
+def _register_classifier(cfg: Dict[str, Any]) -> V2PlantNet:
+    """
+    Factory helper — gọi từ build_model() trong src/architectures/__init__.py.
+    """
+    return V2PlantNet(cfg)
+
 """
 Initialize to get parameters
 """
 if __name__ == "__main__":
     model = V2PlantNet(
-        num_classes=38,
+        cfg_or_num_classes=38,
         class_map = {
         i: f"class_{i}"
         for i in range(38)}

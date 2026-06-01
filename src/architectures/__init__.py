@@ -28,6 +28,9 @@ def build_model(cfg: Dict[str, Any]) -> BaseModel:
         if arch == "advanced_cnn":
             from src.architectures.classifiers.advanced_cnn_classifier import _register_classifier
             return _register_classifier(cfg)
+        elif arch == "v2plantnet":
+            from src.architectures.classifiers.v2plantnet_classifier import _register_classifier
+            return _register_classifier(cfg)
         else:
             raise ValueError(f"Unknown classification architecture: {arch}")
     else:
