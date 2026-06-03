@@ -1,2 +1,4 @@
 ultralytics>=8.0.0
 torchinfo
+gradio
+Pillow
