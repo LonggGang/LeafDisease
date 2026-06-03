@@ -109,7 +109,7 @@ class PlantDiseaseDataset(BasePlantDataset):
         data_yaml_path = None
         search_dirs = [self.root_dir, self.root_dir.parent, self.root_dir.parent.parent]
         for d in search_dirs:
-            for name in ["data.yaml", "dataset.yaml", "data.yml", "dataset.yml"]:
+            for name in ["data.yaml", "dataset.yaml", "data.yml", "dataset.yml", "classes.yaml", "classes.yml"]:
                 p = d / name
                 if p.is_file():
                     data_yaml_path = p
@@ -118,7 +118,7 @@ class PlantDiseaseDataset(BasePlantDataset):
                 break
                 
         if not data_yaml_path:
-            raise FileNotFoundError(f"Could not locate data.yaml or dataset.yaml in any parent directories of {self.root_dir}")
+            raise FileNotFoundError(f"Could not locate a dataset configuration file (data.yaml, dataset.yaml, classes.yaml) in any parent directories of {self.root_dir}")
             
         import yaml
         with open(data_yaml_path, "r", encoding="utf-8") as f:

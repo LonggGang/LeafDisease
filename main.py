@@ -33,6 +33,101 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
+def prepare_yolo_dataset_yaml(data_path: str) -> str:
+    """
+    Validates a YOLO dataset configuration file. If the file is missing 'train' or 'val' keys,
+    it dynamically generates a corrected YAML file in a writable temporary directory
+    (scratch or current working directory) with correct paths and returns the path to the new file.
+    """
+    if not data_path:
+        return data_path
+        
+    from pathlib import Path
+    path_obj = Path(data_path)
+    if not path_obj.exists():
+        return data_path
+        
+    if not (data_path.endswith(".yaml") or data_path.endswith(".yml")):
+        return data_path
+        
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
+    except Exception as e:
+        logger.warning(f"Could not parse YAML at {data_path}: {e}")
+        return data_path
+        
+    if not yaml_data or not isinstance(yaml_data, dict):
+        return data_path
+        
+    # Check if 'train' key is missing or 'val' key is missing
+    has_train = "train" in yaml_data
+    has_val = "val" in yaml_data or "valid" in yaml_data
+    
+    if has_train and has_val:
+        return data_path
+        
+    logger.info(f"Dataset YAML {data_path} is missing 'train' or 'val' keys. Creating a temporary corrected configuration...")
+    
+    corrected_data = yaml_data.copy()
+    
+    # Resolve the directory of the original YAML file as the dataset root path
+    yaml_dir = path_obj.parent.resolve()
+    
+    # If the YAML doesn't have 'path', set it to the directory containing the YAML file
+    if "path" not in corrected_data:
+        corrected_data["path"] = str(yaml_dir).replace("\\", "/")
+        
+    # Determine the train/val directories relative to 'path' (yaml_dir)
+    images_dir = yaml_dir / "images"
+    
+    train_rel = "images"
+    val_rel = "images"
+    
+    if images_dir.is_dir():
+        # Check if there are train/val subdirectories inside images/
+        if (images_dir / "train").is_dir():
+            train_rel = "images/train"
+        if (images_dir / "val").is_dir():
+            val_rel = "images/val"
+        elif (images_dir / "valid").is_dir():
+            val_rel = "images/valid"
+        elif (images_dir / "validation").is_dir():
+            val_rel = "images/validation"
+    else:
+        # Check if train/val directories exist at the same level as the YAML
+        if (yaml_dir / "train" / "images").is_dir():
+            train_rel = "train/images"
+        if (yaml_dir / "val" / "images").is_dir():
+            val_rel = "val/images"
+        elif (yaml_dir / "valid" / "images").is_dir():
+            val_rel = "valid/images"
+            
+    if not has_train:
+        corrected_data["train"] = train_rel
+    if not has_val:
+        corrected_data["val"] = val_rel
+        
+    # Write the corrected YAML to scratch/temp_yolo_dataset.yaml
+    temp_dir = Path("scratch")
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+    except Exception:
+        temp_dir = Path(".")
+        
+    temp_yaml_path = temp_dir / "temp_yolo_dataset.yaml"
+    
+    try:
+        with open(temp_yaml_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(corrected_data, f, default_flow_style=False, sort_keys=False)
+        resolved_path = str(temp_yaml_path.resolve()).replace("\\", "/")
+        logger.info(f"Dynamically generated corrected YOLO dataset configuration at: {resolved_path}")
+        return resolved_path
+    except Exception as e:
+        logger.error(f"Failed to write temporary dataset YAML to {temp_yaml_path}: {e}")
+        return data_path
+
+
 def parse_args() -> argparse.Namespace:
     """Parses command line arguments."""
     parser = argparse.ArgumentParser(description="Plant Leaf Disease Detection Pipeline")
@@ -188,6 +283,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         if not args.output_dir:
             raise ValueError("You must specify --output_dir (output path for cropped dataset) in crop mode.")
         
+        # Preprocess dataset YAML
+        args.data = prepare_yolo_dataset_yaml(args.data)
         logger.info(f"Starting dataset cropping: source={args.data}, target={args.output_dir}")
         from src.dataprocessing.crop_dataset import crop_yolo_dataset
         crop_yolo_dataset(args.data, args.output_dir)
@@ -243,7 +340,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             from src.architectures import build_model
             from src.training import YOLOLeafNetTrainer
 
-            data_path = args.data or cfg_train.get("data", "data/dataset.yaml")
+            data_path = prepare_yolo_dataset_yaml(args.data or cfg_train.get("data", "data/dataset.yaml"))
             logger.info(f"Building detection model: {cfg_model['architecture']}")
             model = build_model(cfg_model)
 
@@ -281,7 +378,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             from src.architectures import build_model
             from src.training import YOLOLeafNetEvaluator
 
-            data_path = args.data or cfg_train.get("data", "data/dataset.yaml")
+            data_path = prepare_yolo_dataset_yaml(args.data or cfg_train.get("data", "data/dataset.yaml"))
             logger.info(f"Building detection model: {cfg_model['architecture']}")
             model = build_model(cfg_model)
 
@@ -346,7 +443,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             logger.info(f"Prediction output: {output}")
 
     elif task == "classification":
-        data_path = args.data or cfg_train.get("data", "data/")
+        data_path = prepare_yolo_dataset_yaml(args.data or cfg_train.get("data", "data/"))
         # If a dataset YAML file is passed, extract the root directory path
         if data_path.endswith(".yaml") or data_path.endswith(".yml"):
             try:
