@@ -15,7 +15,7 @@ try:
     import ultralytics
     import ultralytics.nn.tasks
     from ultralytics import YOLO
-    from ultralytics.nn.modules import C2f
+    from ultralytics.nn.modules import C2f, A2C2f
     from ultralytics.utils.ops import xywh2xyxy
     from ultralytics.utils.nms import non_max_suppression
     from ultralytics.utils.torch_utils import get_flops
@@ -23,6 +23,7 @@ try:
 except ImportError:
     ULTRALYTICS_AVAILABLE = False
     C2f = nn.Module  # fallback stub for definition
+    A2C2f = nn.Module
 
 from src.architectures.detectors.base_detector import BaseDetector
 
@@ -43,6 +44,25 @@ class C2f_BNDropout(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.c2f(x)
+        x = self.bn(x)
+        x = self.dropout(x)
+        return x
+
+
+class A2C2f_BNDropout(nn.Module):
+    """
+    Custom A2C2f block appended with Batch Normalization and Dropout.
+    """
+    def __init__(self, c1: int, c2: int, n: int = 1, a2: bool = True, area: int = 1, residual: bool = False, mlp_ratio: float = 2.0, e: float = 0.5, g: int = 1, shortcut: bool = True, p: float = 0.5):
+        super().__init__()
+        if not ULTRALYTICS_AVAILABLE:
+            raise ImportError("Ultralytics library is required to instantiate A2C2f_BNDropout.")
+        self.a2c2f = A2C2f(c1, c2, n, a2, area, residual, mlp_ratio, e, g, shortcut)
+        self.bn = nn.BatchNorm2d(c2)
+        self.dropout = nn.Dropout(p=p)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.a2c2f(x)
         x = self.bn(x)
         x = self.dropout(x)
         return x
@@ -85,16 +105,17 @@ class YOLOLeafNetDetector(BaseDetector):
         self.model = self._build_yolo_model()
 
     def _register_custom_modules(self) -> None:
-        """Registers C2f_BNDropout in ultralytics tasks namespace."""
-        logger.info("Registering custom C2f_BNDropout module in ultralytics tasks namespace.")
+        """Registers C2f_BNDropout and A2C2f_BNDropout in ultralytics tasks namespace."""
+        logger.info("Registering custom C2f_BNDropout and A2C2f_BNDropout modules in ultralytics tasks namespace.")
         ultralytics.nn.tasks.C2f_BNDropout = C2f_BNDropout
+        ultralytics.nn.tasks.A2C2f_BNDropout = A2C2f_BNDropout
 
     def _build_yolo_model(self) -> YOLO:
         """
-        Dynamically configures and builds the YOLOv8 model.
-        If architecture is 'yolo_leafnet', it builds a customized YOLOv8s backbone
-        and injects custom C2f_BNDropout at layer 8.
-        Otherwise, it instantiates standard YOLO models (e.g., yolov8s, yolov8n).
+        Dynamically configures and builds the YOLOv12s model.
+        If architecture is 'yolo_leafnet', it builds a customized YOLOv12s backbone
+        and injects custom A2C2f_BNDropout at layer 8.
+        Otherwise, it instantiates standard YOLO models (e.g., yolov12s, yolov8s, yolov8n).
         """
         arch = self.cfg.get("architecture", "yolo_leafnet")
         
@@ -131,60 +152,84 @@ class YOLOLeafNetDetector(BaseDetector):
             
         logger.info(f"Wrote configuration to {config_path}")
 
-        # Initialize the model structure with standard C2f at layer 8
-        # Keep this config file persistent so the trainer can reload it during setup.
+        # Initialize the model structure
         model = YOLO(config_path)
 
-        # Load pretrained weights from yolov8s.pt if requested (prior to replacing layer 8)
+        # Load pretrained weights from yolov12s.pt if requested (prior to replacing layer 8)
         if self.pretrained:
             try:
-                logger.info("Loading pretrained weights from yolov8s.pt...")
-                # This downloads/loads standard YOLOv8s
-                standard_model = YOLO("yolov8s.pt")
+                logger.info("Loading pretrained weights from yolov12s.pt...")
+                standard_model = YOLO("yolov12s.pt")
                 pretrained_dict = standard_model.model.state_dict()
                 
-                # Load weights into the model. Since layer 8 is still standard C2f, it matches yolov8s structure.
-                # Filter out parameters with size mismatch (like the detection head)
+                # Filter out parameters with size mismatch
                 model_dict = model.model.state_dict()
                 filtered_dict = {
                     k: v for k, v in pretrained_dict.items()
                     if k in model_dict and v.shape == model_dict[k].shape
                 }
                 model.model.load_state_dict(filtered_dict, strict=False)
-                logger.info("Successfully loaded pretrained yolov8s weights (excluding mismatched head layers).")
+                logger.info("Successfully loaded pretrained yolov12s weights (excluding mismatched head layers).")
             except Exception as e:
                 logger.warning(
-                    f"Could not load pretrained weights from yolov8s.pt: {e}. "
+                    f"Could not load pretrained weights from yolov12s.pt: {e}. "
                     "Falling back to random weights initialization."
                 )
 
-        # Now, replace backbone layer 8 (C2f) with our custom C2f_BNDropout layer in PyTorch model
-        standard_c2f = model.model.model[8]
+        # Now, replace backbone layer 8 with our custom layer in PyTorch model
+        standard_layer = model.model.model[8]
         
-        c1 = standard_c2f.cv1.conv.in_channels
-        c2 = standard_c2f.cv2.conv.out_channels
-        shortcut = standard_c2f.m[0].add if len(standard_c2f.m) > 0 else False
-        n = len(standard_c2f.m)
-        
-        # Instantiate custom block
-        custom_layer = C2f_BNDropout(c1, c2, n=n, shortcut=shortcut, p=self.dropout_rate)
-        
-        # Transfer pretrained weights from standard C2f to our nested c2f block
+        # Check standard_layer type
+        is_a2c2f = False
+        if hasattr(standard_layer, "cv1") and hasattr(standard_layer, "cv2") and hasattr(standard_layer, "m"):
+            c1 = standard_layer.cv1.conv.in_channels
+            c2 = standard_layer.cv2.conv.out_channels
+            n = len(standard_layer.m)
+            
+            # Identify if it is A2C2f
+            is_a2c2f = isinstance(standard_layer.m[0], nn.Sequential) if len(standard_layer.m) > 0 else False
+            
+            if is_a2c2f:
+                # Extract A2C2f parameters
+                first_ablock = standard_layer.m[0][0]
+                area = first_ablock.attn.area
+                mlp_ratio = float(first_ablock.mlp[0].conv.out_channels) / first_ablock.mlp[0].conv.in_channels
+                residual = standard_layer.gamma is not None
+                e = float(standard_layer.cv1.conv.out_channels) / c2
+                
+                custom_layer = A2C2f_BNDropout(
+                    c1, c2, n=n, a2=True, area=area, residual=residual,
+                    mlp_ratio=mlp_ratio, e=e, p=self.dropout_rate
+                )
+                custom_layer_type = "src.architectures.detectors.yolo_leafnet.A2C2f_BNDropout"
+            else:
+                # fallback/backward compatibility with C2f if someone passes YOLOv8 structure
+                shortcut = standard_layer.m[0].add if len(standard_layer.m) > 0 else False
+                custom_layer = C2f_BNDropout(c1, c2, n=n, shortcut=shortcut, p=self.dropout_rate)
+                custom_layer_type = "src.architectures.detectors.yolo_leafnet.C2f_BNDropout"
+        else:
+            raise ValueError(f"Unexpected module type for layer 8: {type(standard_layer)}")
+
+        # Transfer pretrained weights from standard module to our nested module
         if self.pretrained:
             try:
-                custom_layer.c2f.load_state_dict(standard_c2f.state_dict())
-                logger.info("Transferred pretrained weights from standard C2f to C2f_BNDropout.c2f.")
+                if is_a2c2f:
+                    custom_layer.a2c2f.load_state_dict(standard_layer.state_dict())
+                    logger.info("Transferred pretrained weights from standard A2C2f to A2C2f_BNDropout.a2c2f.")
+                else:
+                    custom_layer.c2f.load_state_dict(standard_layer.state_dict())
+                    logger.info("Transferred pretrained weights from standard C2f to C2f_BNDropout.c2f.")
             except Exception as e:
                 logger.warning(f"Could not transfer weights for layer 8: {e}")
                 
         # Copy index and metadata properties required by the parser
-        custom_layer.i = standard_c2f.i
-        custom_layer.f = standard_c2f.f
-        custom_layer.type = "src.architectures.detectors.yolo_leafnet.C2f_BNDropout"
+        custom_layer.i = standard_layer.i
+        custom_layer.f = standard_layer.f
+        custom_layer.type = custom_layer_type
         
         # Replace the module in PyTorch DetectionModel's Sequential container
         model.model.model[8] = custom_layer
-        logger.info("Successfully injected C2f_BNDropout at backbone layer 8.")
+        logger.info(f"Successfully injected custom layer at backbone layer 8.")
 
         return model
 
