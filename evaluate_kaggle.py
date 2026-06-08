@@ -477,7 +477,27 @@ def main():
         print("==============================================")
         temp_split_dir = None
         eval_images_dir = args.od_images
-        eval_labels_dir = args.od_labels if args.od_labels else os.path.join(os.path.dirname(args.od_images), "labels")
+        
+        if args.od_labels:
+            eval_labels_dir = args.od_labels
+        else:
+            # Smart auto-detection of sibling labels directory (supports both split and unsplit paths)
+            img_dir_abs = os.path.abspath(args.od_images)
+            parent_dir = os.path.dirname(img_dir_abs)
+            folder_name = os.path.basename(img_dir_abs)
+            
+            grandparent_dir = os.path.dirname(parent_dir)
+            parent_folder_name = os.path.basename(parent_dir)
+            
+            if folder_name in ["val", "test", "train"] and parent_folder_name == "images":
+                # E.g. path/images/val -> path/labels/val
+                eval_labels_dir = os.path.join(grandparent_dir, "labels", folder_name)
+            elif folder_name == "images":
+                # E.g. path/images -> path/labels
+                eval_labels_dir = os.path.join(parent_dir, "labels")
+            else:
+                # Fallback to sibling folder
+                eval_labels_dir = os.path.join(parent_dir, "labels")
         
         try:
             # Create a dynamic train/val split if requested
