@@ -295,10 +295,25 @@ def create_temp_yolo_yaml(images_dir: str, labels_dir: str, classes_yaml_path: s
     if isinstance(names, list):
         names = {i: name for i, name in enumerate(names)}
         
+    images_dir_abs = os.path.abspath(images_dir)
+    parent_dir = os.path.dirname(images_dir_abs)
+    folder_name = os.path.basename(images_dir_abs)
+    
+    # Check if the folder structure is already split (e.g. images/val or images/train)
+    grandparent_dir = os.path.dirname(parent_dir)
+    parent_folder_name = os.path.basename(parent_dir)
+    
+    if folder_name in ["val", "test", "train"] and parent_folder_name == "images":
+        base_path = grandparent_dir.replace("\\", "/")
+        val_path = f"images/{folder_name}"
+    else:
+        base_path = parent_dir.replace("\\", "/")
+        val_path = folder_name
+        
     yolo_data = {
-        "path": os.path.dirname(os.path.abspath(images_dir)).replace("\\", "/"),
-        "train": "images",
-        "val": "images",
+        "path": base_path,
+        "train": val_path,  # Fallback to same folder for training if needed
+        "val": val_path,
         "names": names,
         "nc": len(names)
     }
@@ -378,6 +393,7 @@ def main():
     parser.add_argument("--ckpt-advance", type=str, default=None, help="Path to AdvancedCNN best_classifier.pth")
     parser.add_argument("--ckpt-plantnet", type=str, default=None, help="Path to V2PlantNet best_classifier.pth")
     parser.add_argument("--ckpt-yolo", type=str, default=None, help="Path to YOLOv12 best.pt")
+    parser.add_argument("--od-split-val-ratio", type=float, default=0.0, help="If > 0, dynamically splits a random portion of unsplit YOLO images for validation on-the-fly")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size for evaluation")
     parser.add_argument("--device", type=str, default="cuda", help="Device to use ('cuda' or 'cpu')")
     parser.add_argument("--dry-run", action="store_true", help="Perform a quick dry run with dummy data to verify model configuration")
@@ -459,10 +475,66 @@ def main():
         print("\n==============================================")
         print("Evaluating YOLOv12s Model")
         print("==============================================")
+        temp_split_dir = None
+        eval_images_dir = args.od_images
+        eval_labels_dir = args.od_labels if args.od_labels else os.path.join(os.path.dirname(args.od_images), "labels")
+        
         try:
+            # Create a dynamic train/val split if requested
+            if args.od_split_val_ratio > 0.0:
+                print(f"Dynamic splitting enabled. Preparing a random {args.od_split_val_ratio*100:.1f}% validation subset...")
+                import random
+                import shutil
+                random.seed(42)
+                
+                temp_split_dir = os.path.abspath("temp_val_split_dir")
+                temp_img_dir = os.path.join(temp_split_dir, "images")
+                temp_lbl_dir = os.path.join(temp_split_dir, "labels")
+                os.makedirs(temp_img_dir, exist_ok=True)
+                os.makedirs(temp_lbl_dir, exist_ok=True)
+                
+                image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG"}
+                all_images = [f for f in os.listdir(args.od_images) 
+                              if os.path.isfile(os.path.join(args.od_images, f)) and os.path.splitext(f)[1] in image_extensions]
+                
+                if not all_images:
+                    raise ValueError(f"No images found in {args.od_images} for dynamic splitting.")
+                    
+                sample_size = max(1, int(len(all_images) * args.od_split_val_ratio))
+                sampled_images = random.sample(all_images, sample_size)
+                
+                print(f"Creating symlinks/copies of {len(sampled_images)} validation images & labels in temporary workspace...")
+                link_count = 0
+                for img_name in sampled_images:
+                    src_img = os.path.join(args.od_images, img_name)
+                    dst_img = os.path.join(temp_img_dir, img_name)
+                    
+                    lbl_name = os.path.splitext(img_name)[0] + ".txt"
+                    src_lbl = os.path.join(eval_labels_dir, lbl_name)
+                    dst_lbl = os.path.join(temp_lbl_dir, lbl_name)
+                    
+                    if os.path.exists(src_lbl):
+                        try:
+                            # Symlink is instant and takes 0 extra disk space
+                            if sys.platform == "win32":
+                                shutil.copy2(src_img, dst_img)
+                                shutil.copy2(src_lbl, dst_lbl)
+                            else:
+                                os.symlink(src_img, dst_img)
+                                os.symlink(src_lbl, dst_lbl)
+                            link_count += 1
+                        except Exception:
+                            # Fallback if symlinks fail (e.g. due to permissions)
+                            shutil.copy2(src_img, dst_img)
+                            shutil.copy2(src_lbl, dst_lbl)
+                            link_count += 1
+                            
+                print(f"Prepared {link_count} validation pairs.")
+                eval_images_dir = temp_img_dir
+                eval_labels_dir = temp_lbl_dir
+            
             # Create a temp yaml configuration file
-            od_labels = args.od_labels if args.od_labels else os.path.join(os.path.dirname(args.od_images), "labels")
-            temp_yaml = create_temp_yolo_yaml(args.od_images, od_labels, args.od_classes_yaml)
+            temp_yaml = create_temp_yolo_yaml(eval_images_dir, eval_labels_dir, args.od_classes_yaml)
             
             res = evaluate_yolo(args.ckpt_yolo, temp_yaml, args.device)
             results["YOLOv12s"] = res
@@ -473,6 +545,12 @@ def main():
                 os.remove(temp_yaml)
         except Exception as e:
             print(f"Failed to evaluate YOLOv12s: {e}")
+        finally:
+            # Always clean up dynamic split folder
+            if temp_split_dir and os.path.exists(temp_split_dir):
+                import shutil
+                print("Cleaning up temporary validation split folder...")
+                shutil.rmtree(temp_split_dir, ignore_errors=True)
             
     # Print Results Table
     if not results:
