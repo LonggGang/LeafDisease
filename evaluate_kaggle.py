@@ -1,6 +1,6 @@
 """
-Self-contained script to evaluate AdvancedCNN, V2PlantNet, and YOLOv12s models on Kaggle.
-Calculates Accuracy, Recall, Precision, F1-score, Inference Time, and Model Complexity.
+Self-contained script to evaluate AdvancedCNN, V2PlantNet, and YOLO models on PlantDoc.
+Calculates Confusion Matrices and exports them into a single combined image.
 """
 import os
 import time
@@ -13,36 +13,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
-from torchvision.datasets import ImageFolder
+from src.dataprocessing.dataset import PlantDiseaseDataset
 
 # Optional packages
 try:
     import yaml
 except ImportError:
-    print("Warning: PyYAML is required for YOLO config generation. Install using: pip install pyyaml")
-
-try:
-    from thop import profile
-    THOP_AVAILABLE = True
-except ImportError:
-    THOP_AVAILABLE = False
+    print("Warning: PyYAML is required. Install using: pip install pyyaml")
 
 try:
     from ultralytics import YOLO
-    from ultralytics.utils.torch_utils import get_flops
     ULTRALYTICS_AVAILABLE = True
 except ImportError:
     ULTRALYTICS_AVAILABLE = False
 
-try:
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-
 
 # =====================================================================
-# 1. Classification Model Architectures (Reproduced from src)
+# 1. Classification Model Architectures
 # =====================================================================
 
 # --- V2PlantNet ---
@@ -171,7 +158,7 @@ class ResidualSEBlock(nn.Module):
 
 
 class AdvancedCNNClassifier(nn.Module):
-    def __init__(self, num_classes: int = 38, dropout_rate: float = 0.3):
+    def __init__(self, num_classes: int = 30, dropout_rate: float = 0.3):
         super().__init__()
         self.num_classes = num_classes
         self.input_size = 224
@@ -204,402 +191,596 @@ class AdvancedCNNClassifier(nn.Module):
 
 
 # =====================================================================
-# 2. Helper Functions for Evaluation
+# 2. PlantDoc and PlantVillage Class Lists & Mappings
 # =====================================================================
 
-def evaluate_classifier(model: nn.Module, data_dir: str, batch_size: int, device: torch.device) -> Dict[str, Any]:
-    """Runs full validation of a classification model and calculates metrics."""
-    # Define validation transforms
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Headless mode for plotting on servers
+import matplotlib.pyplot as plt
+
+plantdoc_classes = [
+    "Apple Scab Leaf", "Apple leaf", "Apple rust leaf", "Bell_pepper leaf spot",
+    "Bell_pepper leaf", "Blueberry leaf", "Cherry leaf", "Corn Gray leaf spot",
+    "Corn leaf blight", "Corn rust leaf", "Peach leaf", "Potato leaf early blight",
+    "Potato leaf late blight", "Potato leaf", "Raspberry leaf", "Soyabean leaf",
+    "Soybean leaf", "Squash Powdery mildew leaf", "Strawberry leaf", "Tomato Early blight leaf",
+    "Tomato Septoria leaf spot", "Tomato leaf bacterial spot", "Tomato leaf late blight",
+    "Tomato leaf mosaic virus", "Tomato leaf yellow virus", "Tomato leaf", "Tomato mold leaf",
+    "Tomato two spotted spider mites leaf", "grape leaf black rot", "grape leaf"
+]
+
+plantvillage_classes = [
+    'Apple___Apple_scab', 'Apple___Black_rot', 'Apple___Cedar_apple_rust', 'Apple___healthy',
+    'Blueberry___healthy', 'Cherry___Powdery_mildew', 'Cherry___healthy',
+    'Corn___Cercospora_leaf_spot Gray_leaf_spot', 'Corn___Common_rust', 'Corn___Northern_Leaf_Blight', 'Corn___healthy',
+    'Grape___Black_rot', 'Grape___Esca_(Black_Measles)', 'Grape___Leaf_blight_(Isariopsis_Leaf_Spot)', 'Grape___healthy',
+    'Orange___Haunglongbing_(Citrus_greening)', 'Peach___Bacterial_spot', 'Peach___healthy',
+    'Pepper,_bell___Bacterial_spot', 'Pepper,_bell___healthy', 'Potato___Early_blight',
+    'Potato___Late_blight', 'Potato___healthy', 'Raspberry___healthy', 'Soybean___healthy',
+    'Squash___Powdery_mildew', 'Strawberry___Leaf_scorch', 'Strawberry___healthy',
+    'Tomato___Bacterial_spot', 'Tomato___Early_blight', 'Tomato___Late_blight', 'Tomato___Leaf_Mold',
+    'Tomato___Septoria_leaf_spot', 'Tomato___Spider_mites Two-spotted_spider_mite', 'Tomato___Target_Spot',
+    'Tomato___Tomato_Yellow_Leaf_Curl_Virus', 'Tomato___Tomato_mosaic_virus', 'Tomato___healthy'
+]
+
+def clean_name(name: str) -> str:
+    return name.replace(" ", "_").replace("/", "_").lower()
+
+def map_pv_name_to_pd_name(pv_name: str) -> Optional[str]:
+    pv_name_lower = pv_name.lower().replace("_", " ").replace(",", "")
+    if "apple" in pv_name_lower:
+        if "scab" in pv_name_lower: return "Apple Scab Leaf"
+        if "rust" in pv_name_lower: return "Apple rust leaf"
+        return "Apple leaf"
+    if "blueberry" in pv_name_lower:
+        return "Blueberry leaf"
+    if "cherry" in pv_name_lower:
+        return "Cherry leaf"
+    if "corn" in pv_name_lower:
+        if "rust" in pv_name_lower or "common" in pv_name_lower: return "Corn rust leaf"
+        if "gray" in pv_name_lower: return "Corn Gray leaf spot"
+        if "blight" in pv_name_lower: return "Corn leaf blight"
+        return None
+    if "grape" in pv_name_lower:
+        if "black rot" in pv_name_lower: return "grape leaf black rot"
+        return "grape leaf"
+    if "peach" in pv_name_lower:
+        return "Peach leaf"
+    if "pepper" in pv_name_lower or "bell" in pv_name_lower:
+        if "spot" in pv_name_lower or "bacterial" in pv_name_lower: return "Bell_pepper leaf spot"
+        return "Bell_pepper leaf"
+    if "potato" in pv_name_lower:
+        if "early" in pv_name_lower: return "Potato leaf early blight"
+        if "late" in pv_name_lower: return "Potato leaf late blight"
+        return "Potato leaf"
+    if "raspberry" in pv_name_lower:
+        return "Raspberry leaf"
+    if "soybean" in pv_name_lower or "soyabean" in pv_name_lower:
+        return "Soybean leaf"
+    if "squash" in pv_name_lower:
+        return "Squash Powdery mildew leaf"
+    if "strawberry" in pv_name_lower:
+        return "Strawberry leaf"
+    if "tomato" in pv_name_lower:
+        if "bacterial" in pv_name_lower: return "Tomato leaf bacterial spot"
+        if "early" in pv_name_lower: return "Tomato Early blight leaf"
+        if "late" in pv_name_lower: return "Tomato leaf late blight"
+        if "mold" in pv_name_lower: return "Tomato mold leaf"
+        if "septoria" in pv_name_lower: return "Tomato Septoria leaf spot"
+        if "spider" in pv_name_lower or "mite" in pv_name_lower: return "Tomato two spotted spider mites leaf"
+        if "yellow" in pv_name_lower: return "Tomato leaf yellow virus"
+        if "mosaic" in pv_name_lower: return "Tomato leaf mosaic virus"
+        return "Tomato leaf"
+    return None
+
+def normalize_pv_name(name: str) -> str:
+    """Canonical normalization of PlantVillage class names to resolve spelling/format differences."""
+    name = name.replace("(including_sour)", "").replace("(maize)", "")
+    name = name.replace(" ", "").replace("_", "").replace("-", "").replace(",", "").replace("(", "").replace(")", "")
+    return name.lower().strip()
+
+def prepare_yolo_yaml(data_path: str) -> str:
+    """
+    Validates a YOLO dataset configuration file. If the file is missing 'train' or 'val' keys,
+    it dynamically generates a corrected YAML file in scratch/temp_yolo_dataset_pv.yaml.
+    """
+    if not data_path:
+        return data_path
+        
+    from pathlib import Path
+    path_obj = Path(data_path)
+    if not path_obj.exists():
+        return data_path
+        
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Could not parse YAML at {data_path}: {e}")
+        return data_path
+        
+    if not yaml_data or not isinstance(yaml_data, dict):
+        return data_path
+        
+    # Check if 'train' or 'val' keys are missing
+    has_train = "train" in yaml_data
+    has_val = "val" in yaml_data or "valid" in yaml_data
+    
+    if has_train and has_val:
+        return data_path
+        
+    print(f"Dataset YAML {data_path} is missing 'train' or 'val' keys. Creating a temporary corrected configuration...")
+    
+    corrected_data = yaml_data.copy()
+    yaml_dir = path_obj.parent.resolve()
+    
+    if "path" not in corrected_data:
+        corrected_data["path"] = str(yaml_dir).replace("\\", "/")
+        
+    # Check images directory
+    images_dir = yaml_dir / "images"
+    train_rel = "images"
+    val_rel = "images"
+    
+    if images_dir.is_dir():
+        if (images_dir / "train").is_dir():
+            train_rel = "images/train"
+        if (images_dir / "val").is_dir():
+            val_rel = "images/val"
+        elif (images_dir / "valid").is_dir():
+            val_rel = "images/valid"
+            
+    corrected_data["train"] = train_rel
+    corrected_data["val"] = val_rel
+    corrected_data["test"] = val_rel
+    
+    temp_dir = Path("scratch")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_yaml_path = temp_dir / "temp_yolo_dataset_pv.yaml"
+    
+    with open(temp_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(corrected_data, f, default_flow_style=False, sort_keys=False)
+        
+    resolved_path = str(temp_yaml_path.resolve()).replace("\\", "/")
+    print(f"Dynamically generated corrected YOLO dataset configuration at: {resolved_path}")
+    return resolved_path
+
+def prepare_yolo_dataset_subset(data_path: str, fraction: float = 1.0) -> Tuple[str, Optional[str]]:
+    """
+    If fraction < 1.0, creates a temporary directory with a subset of images and labels,
+    and returns a path to a generated dataset YAML pointing to it.
+    Otherwise, returns the path to the standard corrected dataset YAML.
+    """
+    if not data_path:
+        return data_path, None
+        
+    from pathlib import Path
+    path_obj = Path(data_path)
+    if not path_obj.exists():
+        return data_path, None
+        
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Could not parse YAML at {data_path}: {e}")
+        return data_path, None
+        
+    if not yaml_data or not isinstance(yaml_data, dict):
+        return data_path, None
+        
+    names = yaml_data.get("names", {})
+    nc = yaml_data.get("nc", len(names))
+    
+    yaml_dir = path_obj.parent.resolve()
+    orig_img_dir = yaml_dir / "images"
+    orig_lbl_dir = yaml_dir / "labels"
+    
+    if not orig_img_dir.exists() or not orig_lbl_dir.exists():
+        # Fallback to standard check
+        prepared = prepare_yolo_yaml(data_path)
+        return prepared, None
+        
+    if fraction >= 1.0:
+        prepared = prepare_yolo_yaml(data_path)
+        return prepared, None
+        
+    print(f"Preparing temporary YOLO dataset subset (fraction={fraction})...")
+    import random
+    import shutil
+    random.seed(42)
+    
+    temp_dir = Path("scratch/temp_yolo_subset")
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    temp_img_dir = temp_dir / "images"
+    temp_lbl_dir = temp_dir / "labels"
+    os.makedirs(temp_img_dir, exist_ok=True)
+    os.makedirs(temp_lbl_dir, exist_ok=True)
+    
+    img_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG"}
+    all_images = [f for f in os.listdir(orig_img_dir) 
+                  if os.path.isfile(orig_img_dir / f) and os.path.splitext(f)[1] in img_extensions]
+                  
+    if not all_images:
+        print("Warning: No images found, falling back to full dataset.")
+        prepared = prepare_yolo_yaml(data_path)
+        return prepared, None
+        
+    sample_size = max(1, int(len(all_images) * fraction))
+    sampled_images = random.sample(all_images, sample_size)
+    
+    print(f"Copying {len(sampled_images)} images and labels for subset evaluation...")
+    for img_name in sampled_images:
+        shutil.copy2(orig_img_dir / img_name, temp_img_dir / img_name)
+        lbl_name = os.path.splitext(img_name)[0] + ".txt"
+        if (orig_lbl_dir / lbl_name).exists():
+            shutil.copy2(orig_lbl_dir / lbl_name, temp_lbl_dir / lbl_name)
+            
+    corrected_data = {
+        "path": str(temp_dir.resolve()).replace("\\", "/"),
+        "train": "images",
+        "val": "images",
+        "test": "images",
+        "names": names,
+        "nc": nc
+    }
+    
+    temp_yaml_path = temp_dir / "temp_yolo_dataset_pv.yaml"
+    with open(temp_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(corrected_data, f, default_flow_style=False, sort_keys=False)
+        
+    resolved_yaml = str(temp_yaml_path.resolve()).replace("\\", "/")
+    print(f"Subset dataset config created at: {resolved_yaml}")
+    return resolved_yaml, str(temp_dir.resolve())
+
+# =====================================================================
+
+# =====================================================================
+# 3. Helper Functions for Evaluation and Confusion Matrix Generation
+# =====================================================================
+
+def evaluate_classifier_cm(model: nn.Module, checkpoint_path: str, data_dir: str, device: torch.device, model_type: str = "advanced_cnn", dataset_name: str = "PlantDoc", fraction: float = 1.0) -> np.ndarray:
+    """Evaluates classification model and returns its aligned confusion matrix."""
+    print(f"Loading classifier checkpoint from {checkpoint_path}...")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+    
     val_transforms = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
-    print(f"Loading dataset from {data_dir}...")
-    dataset = ImageFolder(data_dir, transform=val_transforms)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     
-    model.to(device)
-    model.eval()
+    print(f"Loading classification dataset from {data_dir}...")
+    dataset = PlantDiseaseDataset(data_dir, transform=val_transforms)
+    dataset_classes = dataset.classes
     
-    all_preds = []
-    all_targets = []
+    if fraction < 1.0:
+        num_samples = max(1, int(len(dataset) * fraction))
+        generator = torch.Generator().manual_seed(42)
+        dataset, _ = torch.utils.data.random_split(dataset, [num_samples, len(dataset) - num_samples], generator=generator)
+        print(f"Subsampled classification dataset to {num_samples} samples (fraction={fraction}).")
+        
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=2)
     
-    # Latency tracking (using single batch inference to measure raw forward time)
-    latencies = []
+    y_true = []
+    y_pred = []
     
-    print("Evaluating classifier...")
-    with torch.no_grad():
-        for i, (images, labels) in enumerate(dataloader):
-            images, labels = images.to(device), labels.to(device)
-            
-            # Latency measurement on a per-batch basis, normalized to per-image
-            t0 = time.perf_counter()
-            outputs = model(images)
-            dt = (time.perf_counter() - t0) * 1000.0 / images.size(0) # ms per image
-            latencies.append(dt)
-            
-            _, predicted = outputs.max(1)
-            all_preds.extend(predicted.cpu().numpy())
-            all_targets.extend(labels.cpu().numpy())
-            
-            if (i+1) % 50 == 0:
-                print(f"Processed batch {i+1}/{len(dataloader)}")
+    if dataset_name == "PlantDoc":
+        clean_pd_classes = [clean_name(c) for c in plantdoc_classes]
+        sorted_pd_classes = sorted(plantdoc_classes)
+        
+        with torch.no_grad():
+            for images, labels in dataloader:
+                images = images.to(device)
+                outputs = model(images)
+                _, preds = outputs.max(dim=1)
                 
-    # Calculate metrics
-    avg_latency = sum(latencies) / len(latencies)
-    
-    if SKLEARN_AVAILABLE:
-        acc = accuracy_score(all_targets, all_preds)
-        prec = precision_score(all_targets, all_preds, average='macro', zero_division=0)
-        rec = recall_score(all_targets, all_preds, average='macro', zero_division=0)
-        f1 = f1_score(all_targets, all_preds, average='macro', zero_division=0)
-    else:
-        # Simple manual fallback if sklearn is missing
-        correct = sum(1 for p, t in zip(all_preds, all_targets) if p == t)
-        acc = correct / len(all_targets) if all_targets else 0
-        prec, rec, f1 = 0.0, 0.0, 0.0
-        print("Warning: scikit-learn is not installed. Recall, Precision, and F1 calculations are skipped.")
-
-    # Complexity
-    params_M = sum(p.numel() for p in model.parameters()) / 1e6
-    
-    flops_G = "N/A"
-    if THOP_AVAILABLE:
-        try:
-            dummy_input = torch.randn(1, 3, 224, 224).to(device)
-            flops, _ = profile(model, inputs=(dummy_input,), verbose=False)
-            flops_G = flops / 1e9
-        except Exception as e:
-            print(f"Could not calculate FLOPs: {e}")
-            
-    return {
-        "Acc": acc,
-        "Recall": rec,
-        "Precision": prec,
-        "F1": f1,
-        "Inference_ms": avg_latency,
-        "Params_M": params_M,
-        "GFLOPs": flops_G
-    }
-
-
-def create_temp_yolo_yaml(images_dir: str, labels_dir: str, classes_yaml_path: str) -> str:
-    """Generates a temporary dataset configuration yaml for YOLO."""
-    with open(classes_yaml_path, "r", encoding="utf-8") as f:
-        classes_data = yaml.safe_load(f)
+                for label, pred in zip(labels, preds):
+                    true_name = dataset_classes[label.item()]
+                    try:
+                        true_idx = clean_pd_classes.index(clean_name(true_name))
+                    except ValueError:
+                        continue  # skip if name doesn't match
+                    
+                    pred_idx_val = pred.item()
+                    if model_type == "advanced_cnn":
+                        pred_name = sorted_pd_classes[pred_idx_val]
+                    else:  # v2plantnet has 38 classes
+                        pred_name_pv = plantvillage_classes[pred_idx_val]
+                        pred_name = map_pv_name_to_pd_name(pred_name_pv)
+                    
+                    if pred_name and clean_name(pred_name) in clean_pd_classes:
+                        pred_idx = clean_pd_classes.index(clean_name(pred_name))
+                    else:
+                        pred_idx = 30  # background / unmapped
+                        
+                    y_true.append(true_idx)
+                    y_pred.append(pred_idx)
+                    
+        # Compute 31x31 confusion matrix
+        cm = np.zeros((31, 31), dtype=np.int64)
+        for t, p in zip(y_true, y_pred):
+            cm[t, p] += 1
+        return cm
         
-    names = classes_data.get("names", {})
-    # Convert list to dict if needed
-    if isinstance(names, list):
-        names = {i: name for i, name in enumerate(names)}
-        
-    images_dir_abs = os.path.abspath(images_dir)
-    parent_dir = os.path.dirname(images_dir_abs)
-    folder_name = os.path.basename(images_dir_abs)
-    
-    # Check if the folder structure is already split (e.g. images/val or images/train)
-    grandparent_dir = os.path.dirname(parent_dir)
-    parent_folder_name = os.path.basename(parent_dir)
-    
-    if folder_name in ["val", "test", "train"] and parent_folder_name == "images":
-        base_path = grandparent_dir.replace("\\", "/")
-        val_path = f"images/{folder_name}"
-    else:
-        base_path = parent_dir.replace("\\", "/")
-        val_path = folder_name
-        
-    yolo_data = {
-        "path": base_path,
-        "train": val_path,  # Fallback to same folder for training if needed
-        "val": val_path,
-        "names": names,
-        "nc": len(names)
-    }
-    
-    temp_yaml_path = "temp_yolo_dataset_kaggle.yaml"
-    with open(temp_yaml_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(yolo_data, f, default_flow_style=False, sort_keys=False)
-        
-    print(f"Generated temporary YOLO config at: {os.path.abspath(temp_yaml_path)}")
-    return temp_yaml_path
+    else:  # PlantVillage
+        # Build mapping index from dataset_classes to plantvillage_classes
+        folder_to_pv_idx = {}
+        for folder_name in dataset_classes:
+            normalized_folder = normalize_pv_name(folder_name)
+            match_idx = None
+            for pv_idx, pv_class in enumerate(plantvillage_classes):
+                if normalize_pv_name(pv_class) == normalized_folder:
+                    match_idx = pv_idx
+                    break
+            if match_idx is not None:
+                folder_to_pv_idx[folder_name] = match_idx
+            else:
+                print(f"Warning: No match found for folder {folder_name}")
+                folder_to_pv_idx[folder_name] = 38 # background / unmapped
+                
+        with torch.no_grad():
+            for images, labels in dataloader:
+                images = images.to(device)
+                outputs = model(images)
+                _, preds = outputs.max(dim=1)
+                
+                for label, pred in zip(labels, preds):
+                    true_name = dataset_classes[label.item()]
+                    true_idx = folder_to_pv_idx.get(true_name, 38)
+                    
+                    pred_idx_val = pred.item()
+                    if pred_idx_val < len(dataset_classes):
+                        pred_folder_name = dataset_classes[pred_idx_val]
+                        pred_idx = folder_to_pv_idx.get(pred_folder_name, 38)
+                    else:
+                        pred_idx = 38
+                        
+                    y_true.append(true_idx)
+                    y_pred.append(pred_idx)
+                    
+        # Compute 39x39 confusion matrix
+        cm = np.zeros((39, 39), dtype=np.int64)
+        for t, p in zip(y_true, y_pred):
+            cm[t, p] += 1
+        return cm
 
-
-def evaluate_yolo(ckpt_path: str, dataset_yaml: str, device: str) -> Dict[str, Any]:
-    """Runs YOLO validation and returns standard metrics."""
-    if not ULTRALYTICS_AVAILABLE:
-        raise ImportError("Ultralytics library is required to evaluate YOLO models.")
-        
-    print(f"Loading YOLO model from {ckpt_path}...")
-    model = YOLO(ckpt_path)
-    
-    # Run built-in validation
-    print("Running YOLO validation...")
+def evaluate_yolo_cm(checkpoint_path: str, dataset_yaml: str, device: str, conf: float = 0.25) -> np.ndarray:
+    """Evaluates YOLO model and returns its confusion matrix."""
+    print(f"Loading YOLO model from {checkpoint_path}...")
+    model = YOLO(checkpoint_path)
     results = model.val(
         data=dataset_yaml,
-        split='val',
+        split='test',
         device=device,
-        verbose=False
+        verbose=False,
+        conf=conf
     )
-    
-    res_dict = results.results_dict
-    mAP50 = float(res_dict.get("metrics/mAP50(B)", 0.0))
-    mAP50_95 = float(res_dict.get("metrics/mAP50-95(B)", 0.0))
-    precision = float(res_dict.get("metrics/precision(B)", 0.0))
-    recall = float(res_dict.get("metrics/recall(B)", 0.0))
-    
-    # F1-score calculation
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    
-    # Latency (preprocess + inference + postprocess)
-    preprocess_ms = results.speed.get("preprocess", 0.0)
-    inference_ms = results.speed.get("inference", 0.0)
-    postprocess_ms = results.speed.get("postprocess", 0.0)
-    total_latency = preprocess_ms + inference_ms + postprocess_ms
-    
-    # Complexity
-    params_M = sum(p.numel() for p in model.model.parameters()) / 1e6
-    
-    flops_G = "N/A"
-    try:
-        flops_G = float(get_flops(model.model, imgsz=640))
-    except Exception as e:
-        print(f"Could not calculate FLOPs for YOLO: {e}")
-        
-    return {
-        "Acc": "N/A",  # Detection doesn't have standard classification accuracy
-        "Recall": recall,
-        "Precision": precision,
-        "F1": f1,
-        "mAP50": mAP50,
-        "mAP50_95": mAP50_95,
-        "Inference_ms": total_latency,
-        "Params_M": params_M,
-        "GFLOPs": flops_G
-    }
-
+    # Get the matrix
+    cm = results.confusion_matrix.matrix
+    return cm
 
 # =====================================================================
-# 3. Main Execution Block
+# 4. Main Execution Block
 # =====================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Kaggle Evaluation Script for Leaf Disease Models")
-    parser.add_argument("--class-data", type=str, default=None, help="Path to classification validation dataset directory (e.g. valid/)")
-    parser.add_argument("--od-images", type=str, default=None, help="Path to object detection images directory (e.g. Dataset/images/)")
-    parser.add_argument("--od-labels", type=str, default=None, help="Path to object detection labels directory (e.g. Dataset/labels/)")
-    parser.add_argument("--od-classes-yaml", type=str, default=None, help="Path to classes.yaml for object detection")
-    parser.add_argument("--ckpt-advance", type=str, default=None, help="Path to AdvancedCNN best_classifier.pth")
-    parser.add_argument("--ckpt-plantnet", type=str, default=None, help="Path to V2PlantNet best_classifier.pth")
-    parser.add_argument("--ckpt-yolo", type=str, default=None, help="Path to YOLOv12 best.pt")
-    parser.add_argument("--od-split-val-ratio", type=float, default=0.0, help="If > 0, dynamically splits a random portion of unsplit YOLO images for validation on-the-fly")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size for evaluation")
+    parser = argparse.ArgumentParser(description="Evaluate Leaf Disease Models and Generate Confusion Matrices")
+    parser.add_argument("--dataset", type=str, default="PlantDoc", choices=["PlantDoc", "PlantVillage"], help="Dataset to evaluate on")
+    parser.add_argument("--class-data", type=str, default=None, help="Path to classification test set (overrides default)")
+    parser.add_argument("--od-yaml", type=str, default=None, help="Path to object detection YAML config (overrides default)")
+    parser.add_argument("--output-img", type=str, default=None, help="Path to save the combined image (overrides default)")
     parser.add_argument("--device", type=str, default="cuda", help="Device to use ('cuda' or 'cpu')")
-    parser.add_argument("--dry-run", action="store_true", help="Perform a quick dry run with dummy data to verify model configuration")
+    parser.add_argument("--fraction", type=float, default=None, help="Fraction of dataset to evaluate (defaults to 0.02 on CPU for PlantVillage, 1.0 otherwise)")
+    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for object detection evaluation (default: 0.25)")
+    parser.add_argument("--checkpoints-dir", type=str, default="checkpoints", help="Base directory for checkpoints (default: 'checkpoints')")
+    parser.add_argument("--ckpt-advance", type=str, default=None, help="Path to AdvancedCNN checkpoint (overrides default)")
+    parser.add_argument("--ckpt-plantnet", type=str, default=None, help="Path to V2PlantNet checkpoint (overrides default)")
+    parser.add_argument("--ckpt-yolov8s-leafnet", type=str, default=None, help="Path to YOLO-LeafNet (v8s) checkpoint (overrides default)")
+    parser.add_argument("--ckpt-yolov12s", type=str, default=None, help="Path to YOLOv12s checkpoint (overrides default)")
+    parser.add_argument("--ckpt-yolov12s-leafnet", type=str, default=None, help="Path to YOLOv12s-LeafNet checkpoint (overrides default)")
+    parser.add_argument("--ckpt-yolov5s", type=str, default=None, help="Path to YOLOv5s checkpoint (overrides default)")
     
     args = parser.parse_args()
     
     device = torch.device(args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
+    
+    # Determine fraction to evaluate
+    if args.fraction is not None:
+        fraction = args.fraction
+    else:
+        if device.type == "cpu" and args.dataset == "PlantVillage":
+            fraction = 0.02
+        else:
+            fraction = 1.0
+            
+    # Set default values based on --dataset if not overridden
+    base_dir = args.checkpoints_dir
+    
+    if args.dataset == "PlantDoc":
+        class_data = args.class_data if args.class_data else "data/PlantDoc/test"
+        od_yaml = args.od_yaml if args.od_yaml else "data/PlantDoc/data.yaml"
+        output_img = args.output_img if args.output_img else "combined_confusion_matrix.png"
+        num_classes = 30
+        classes_list = plantdoc_classes
+        title_dataset = "PlantDoc Dataset"
+        
+        default_paths = {
+            "AdvancedCNN": f"{base_dir}/main_models_plantdoc/cnn_Advance_finetune_2/best_classifier.pth",
+            "V2PlantNet": f"{base_dir}/main_models_plantdoc/plantnet_finetune/best_classifier.pth",
+            "YOLO-LeafNet (v8s)": f"{base_dir}/main_models_plantdoc/yolo_leafnet_yolov8s/weights/best.pt",
+            "YOLOv12s": f"{base_dir}/main_models_plantdoc/yolov12s/weights/best.pt",
+            "YOLOv12s-LeafNet": f"{base_dir}/main_models_plantdoc/yolov12s_leafnet_plantdoc/weights/best.pt",
+            "YOLOv5s": f"{base_dir}/main_models_plantdoc/yolov5s/weights/best.pt"
+        }
+    else:  # PlantVillage
+        class_data = args.class_data if args.class_data else "data/PlantVillage/New Plant Diseases Dataset(Augmented)/New Plant Diseases Dataset(Augmented)/valid"
+        od_yaml = args.od_yaml if args.od_yaml else "data/PlantVillage_OD/PlantVillage_for_object_detection/Dataset/classes.yaml"
+        output_img = args.output_img if args.output_img else "combined_confusion_matrix_plantvillage.png"
+        num_classes = 38
+        classes_list = plantvillage_classes
+        title_dataset = "PlantVillage Dataset"
+        
+        default_paths = {
+            "AdvancedCNN": f"{base_dir}/main_models_plantVillage/cnn_Advance_pretrain_2/best_classifier.pth",
+            "V2PlantNet": f"{base_dir}/main_models_plantVillage/plantnet_pretrain/best_classifier.pth",
+            "YOLO-LeafNet (v8s)": f"{base_dir}/main_models_plantVillage/yolov8s_leafnet_plant_village/weights/best.pt",
+            "YOLOv12s": f"{base_dir}/main_models_plantVillage/yolov12s/best.pt",
+            "YOLOv12s-LeafNet": f"{base_dir}/main_models_plantVillage/yolov12s_leafnet_plant_village/weights/best.pt",
+            "YOLOv5s": f"{base_dir}/main_models_plantVillage/yolov5s_plant_village/weights/best.pt"
+        }
+        
+    overrides = {
+        "AdvancedCNN": args.ckpt_advance,
+        "V2PlantNet": args.ckpt_plantnet,
+        "YOLO-LeafNet (v8s)": args.ckpt_yolov8s_leafnet,
+        "YOLOv12s": args.ckpt_yolov12s,
+        "YOLOv12s-LeafNet": args.ckpt_yolov12s_leafnet,
+        "YOLOv5s": args.ckpt_yolov5s
+    }
+    
+    checkpoints = {}
+    for name, path in default_paths.items():
+        task = "detection" if "YOLO" in name else "classification"
+        model_type = "advanced_cnn" if name == "AdvancedCNN" else ("v2plantnet" if name == "V2PlantNet" else "")
+        final_path = overrides[name] if overrides[name] is not None else path
+        checkpoints[name] = (final_path, task, model_type)
+        
     print(f"Using device: {device}")
+    print(f"Dataset mode: {args.dataset}")
+    print(f"Evaluation fraction: {fraction}")
+    print(f"Classification Data: {class_data}")
+    print(f"Object Detection YAML: {od_yaml}")
+    print(f"Output Image Path: {output_img}")
     
-    if args.dry_run:
-        print("=== DRY RUN MODE ===")
-        # Instantiate and test AdvancedCNN
-        try:
-            print("Instantiating AdvancedCNN...")
-            model = AdvancedCNNClassifier(num_classes=38)
-            x = torch.randn(1, 3, 224, 224)
-            y = model(x)
-            print(f"AdvancedCNN Output shape: {y.shape} (Expected: [1, 38])")
-            print("AdvancedCNN OK!")
-        except Exception as e:
-            print(f"AdvancedCNN Dry-run Failed: {e}")
-            
-        # Instantiate and test V2PlantNet
-        try:
-            print("Instantiating V2PlantNet...")
-            model = V2PlantNet(num_classes=38)
-            x = torch.randn(1, 3, 224, 224)
-            y = model(x)
-            print(f"V2PlantNet Output shape: {y.shape} (Expected: [1, 38])")
-            print("V2PlantNet OK!")
-        except Exception as e:
-            print(f"V2PlantNet Dry-run Failed: {e}")
-            
-        # Check YOLO import
-        if ULTRALYTICS_AVAILABLE:
-            print("Ultralytics and get_flops imported successfully!")
-        else:
-            print("Ultralytics library NOT available.")
-        sys.exit(0)
+    # Check if directories exist
+    if not os.path.exists(class_data):
+        print(f"Error: Classification data folder {class_data} not found.")
+        sys.exit(1)
+    if not os.path.exists(od_yaml):
+        print(f"Error: Object Detection YAML file {od_yaml} not found.")
+        sys.exit(1)
         
-    results = {}
+    # Dynamically generate corrected YOLO yaml or subset yaml if fraction < 1.0
+    prepared_yaml, temp_subset_dir = prepare_yolo_dataset_subset(od_yaml, fraction=fraction)
     
-    # 1. Evaluate AdvancedCNN
-    if args.ckpt_advance and args.class_data:
-        print("\n==============================================")
-        print("Evaluating AdvancedCNN Model")
-        print("==============================================")
+    cm_results = {}
+    
+    # Define matrix size including background
+    matrix_dim = num_classes + 1
+    
+    for name, (path, task, model_type) in checkpoints.items():
+        print(f"\n==============================================")
+        print(f"Evaluating {name}")
+        print(f"==============================================")
+        if not os.path.exists(path):
+            print(f"Warning: Checkpoint not found at {path}. Skipping this model.")
+            # Create a dummy confusion matrix for layout consistency
+            cm_results[name] = np.zeros((matrix_dim, matrix_dim), dtype=np.int64)
+            continue
+            
         try:
-            model = AdvancedCNNClassifier(num_classes=38)
-            checkpoint = torch.load(args.ckpt_advance, map_location="cpu", weights_only=False)
-            state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
-            model.load_state_dict(state_dict)
-            
-            res = evaluate_classifier(model, args.class_data, args.batch_size, device)
-            results["AdvancedCNN"] = res
-            print("AdvancedCNN Evaluation Done!")
-        except Exception as e:
-            print(f"Failed to evaluate AdvancedCNN: {e}")
-            
-    # 2. Evaluate V2PlantNet
-    if args.ckpt_plantnet and args.class_data:
-        print("\n==============================================")
-        print("Evaluating V2PlantNet Model")
-        print("==============================================")
-        try:
-            model = V2PlantNet(num_classes=38)
-            checkpoint = torch.load(args.ckpt_plantnet, map_location="cpu", weights_only=False)
-            state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
-            model.load_state_dict(state_dict)
-            
-            res = evaluate_classifier(model, args.class_data, args.batch_size, device)
-            results["V2PlantNet"] = res
-            print("V2PlantNet Evaluation Done!")
-        except Exception as e:
-            print(f"Failed to evaluate V2PlantNet: {e}")
-            
-    # 3. Evaluate YOLOv12s
-    if args.ckpt_yolo and args.od_images and args.od_classes_yaml:
-        print("\n==============================================")
-        print("Evaluating YOLOv12s Model")
-        print("==============================================")
-        temp_split_dir = None
-        eval_images_dir = args.od_images
-        
-        if args.od_labels:
-            eval_labels_dir = args.od_labels
-        else:
-            # Smart auto-detection of sibling labels directory (supports both split and unsplit paths)
-            img_dir_abs = os.path.abspath(args.od_images)
-            parent_dir = os.path.dirname(img_dir_abs)
-            folder_name = os.path.basename(img_dir_abs)
-            
-            grandparent_dir = os.path.dirname(parent_dir)
-            parent_folder_name = os.path.basename(parent_dir)
-            
-            if folder_name in ["val", "test", "train"] and parent_folder_name == "images":
-                # E.g. path/images/val -> path/labels/val
-                eval_labels_dir = os.path.join(grandparent_dir, "labels", folder_name)
-            elif folder_name == "images":
-                # E.g. path/images -> path/labels
-                eval_labels_dir = os.path.join(parent_dir, "labels")
+            if task == "classification":
+                if model_type == "advanced_cnn":
+                    model = AdvancedCNNClassifier(num_classes=num_classes)
+                else:
+                    model = V2PlantNet(num_classes=38)  # V2PlantNet was trained on 38 classes in both checkpoints!
+                    
+                cm = evaluate_classifier_cm(model, path, class_data, device, model_type, dataset_name=args.dataset, fraction=fraction)
             else:
-                # Fallback to sibling folder
-                eval_labels_dir = os.path.join(parent_dir, "labels")
-        
-        try:
-            # Create a dynamic train/val split if requested
-            if args.od_split_val_ratio > 0.0:
-                print(f"Dynamic splitting enabled. Preparing a random {args.od_split_val_ratio*100:.1f}% validation subset...")
-                import random
-                import shutil
-                random.seed(42)
+                # YOLO val runs on split 'test'
+                # Convert torch device to YOLO compatible format
+                device_yolo = "0" if device.type == "cuda" else "cpu"
+                cm = evaluate_yolo_cm(path, prepared_yaml, device_yolo, conf=args.conf)
                 
-                temp_split_dir = os.path.abspath("temp_val_split_dir")
-                temp_img_dir = os.path.join(temp_split_dir, "images")
-                temp_lbl_dir = os.path.join(temp_split_dir, "labels")
-                os.makedirs(temp_img_dir, exist_ok=True)
-                os.makedirs(temp_lbl_dir, exist_ok=True)
+            # If the returned cm size is different from matrix_dim, pad/crop it
+            if cm.shape[0] != matrix_dim or cm.shape[1] != matrix_dim:
+                print(f"Warning: Matrix dimension mismatch for {name}: got {cm.shape}, expected ({matrix_dim}, {matrix_dim}). Resizing matrix...")
+                new_cm = np.zeros((matrix_dim, matrix_dim), dtype=np.int64)
+                min_r = min(cm.shape[0], matrix_dim)
+                min_c = min(cm.shape[1], matrix_dim)
+                new_cm[:min_r, :min_c] = cm[:min_r, :min_c]
+                cm = new_cm
                 
-                image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG"}
-                all_images = [f for f in os.listdir(args.od_images) 
-                              if os.path.isfile(os.path.join(args.od_images, f)) and os.path.splitext(f)[1] in image_extensions]
-                
-                if not all_images:
-                    raise ValueError(f"No images found in {args.od_images} for dynamic splitting.")
-                    
-                sample_size = max(1, int(len(all_images) * args.od_split_val_ratio))
-                sampled_images = random.sample(all_images, sample_size)
-                
-                print(f"Creating symlinks/copies of {len(sampled_images)} validation images & labels in temporary workspace...")
-                link_count = 0
-                for img_name in sampled_images:
-                    src_img = os.path.join(args.od_images, img_name)
-                    dst_img = os.path.join(temp_img_dir, img_name)
-                    
-                    lbl_name = os.path.splitext(img_name)[0] + ".txt"
-                    src_lbl = os.path.join(eval_labels_dir, lbl_name)
-                    dst_lbl = os.path.join(temp_lbl_dir, lbl_name)
-                    
-                    if os.path.exists(src_lbl):
-                        try:
-                            # Symlink is instant and takes 0 extra disk space
-                            if sys.platform == "win32":
-                                shutil.copy2(src_img, dst_img)
-                                shutil.copy2(src_lbl, dst_lbl)
-                            else:
-                                os.symlink(src_img, dst_img)
-                                os.symlink(src_lbl, dst_lbl)
-                            link_count += 1
-                        except Exception:
-                            # Fallback if symlinks fail (e.g. due to permissions)
-                            shutil.copy2(src_img, dst_img)
-                            shutil.copy2(src_lbl, dst_lbl)
-                            link_count += 1
-                            
-                print(f"Prepared {link_count} validation pairs.")
-                eval_images_dir = temp_img_dir
-                eval_labels_dir = temp_lbl_dir
-            
-            # Create a temp yaml configuration file
-            temp_yaml = create_temp_yolo_yaml(eval_images_dir, eval_labels_dir, args.od_classes_yaml)
-            
-            res = evaluate_yolo(args.ckpt_yolo, temp_yaml, args.device)
-            results["YOLOv12s"] = res
-            print("YOLOv12s Evaluation Done!")
-            
-            # Clean up temp file
-            if os.path.exists(temp_yaml):
-                os.remove(temp_yaml)
+            cm_results[name] = cm
+            print(f"Successfully evaluated {name}. Matrix shape: {cm.shape}")
         except Exception as e:
-            print(f"Failed to evaluate YOLOv12s: {e}")
-        finally:
-            # Always clean up dynamic split folder
-            if temp_split_dir and os.path.exists(temp_split_dir):
-                import shutil
-                print("Cleaning up temporary validation split folder...")
-                shutil.rmtree(temp_split_dir, ignore_errors=True)
+            print(f"Failed to evaluate {name}: {e}")
+            import traceback
+            traceback.print_exc()
+            cm_results[name] = np.zeros((matrix_dim, matrix_dim), dtype=np.int64)
             
-    # Print Results Table
-    if not results:
-        print("\nNo models were evaluated. Please provide checkpoints and datasets paths.")
-        print("Use --help to see all available arguments.")
-        return
-        
-    print("\n\n========================================================")
-    print("EVALUATION RESULTS REPORT")
-    print("========================================================")
-    
-    # Format and display a markdown table
-    print("\n| Model | Acc | Recall | Precision | F1 | Inference Time (ms) | Params (M) | GFLOPs | mAP@50 | mAP@50-95 |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-    for name, r in results.items():
-        acc = f"{r['Acc']*100:.2f}%" if isinstance(r["Acc"], float) else r["Acc"]
-        rec = f"{r['Recall']*100:.2f}%" if isinstance(r["Recall"], float) else r["Recall"]
-        prec = f"{r['Precision']*100:.2f}%" if isinstance(r["Precision"], float) else r["Precision"]
-        f1 = f"{r['F1']*100:.2f}%" if isinstance(r["F1"], float) else r["F1"]
-        
-        map50 = f"{r['mAP50']*100:.2f}%" if "mAP50" in r else "-"
-        map50_95 = f"{r['mAP50_95']*100:.2f}%" if "mAP50_95" in r else "-"
-        
-        flops = f"{r['GFLOPs']:.4f}" if isinstance(r["GFLOPs"], float) else r["GFLOPs"]
-        
-        print(f"| {name} | {acc} | {rec} | {prec} | {f1} | {r['Inference_ms']:.2f} ms | {r['Params_M']:.2f} M | {flops} | {map50} | {map50_95} |")
-        
-    print("\n========================================================")
+    # Clean up temp files and subset directory
+    if temp_subset_dir and os.path.exists(temp_subset_dir):
+        import shutil
+        try:
+            shutil.rmtree(temp_subset_dir, ignore_errors=True)
+            print("Cleaned up temporary YOLO subset directory.")
+        except Exception:
+            pass
+    elif prepared_yaml != od_yaml and os.path.exists(prepared_yaml):
+        try:
+            os.remove(prepared_yaml)
+            print("Cleaned up temporary YOLO configuration file.")
+        except Exception:
+            pass
 
+    # Plotting Combined Confusion Matrix Image
+    print("\nGenerating combined confusion matrix plot...")
+    fig, axes = plt.subplots(2, 3, figsize=(24, 16) if args.dataset == "PlantVillage" else (22, 14))
+    axes = axes.ravel()
+    
+    # Add background class label
+    labels_list = classes_list + ["background"]
+    
+    for i, (name, cm) in enumerate(cm_results.items()):
+        ax = axes[i]
+        
+        # Calculate normalized matrix (row sum = 1.0)
+        row_sums = cm.sum(axis=1, keepdims=True)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cm_norm = np.where(row_sums > 0, cm.astype('float') / row_sums, 0.0)
+        
+        im = ax.imshow(cm_norm, cmap='Blues', interpolation='nearest', vmin=0.0, vmax=1.0)
+        ax.set_title(name, fontsize=16, fontweight='bold', pad=10)
+        
+        ax.set_xticks(range(matrix_dim))
+        ax.set_yticks(range(matrix_dim))
+        
+        # Only show text labels on the outer edge axes to avoid clutter
+        # Label font size is smaller for PlantVillage to prevent overlap
+        lbl_size = 5 if args.dataset == "PlantVillage" else 7
+        
+        if i in [0, 3]:
+            ax.set_ylabel("True Label", fontsize=12)
+            ax.set_yticklabels(labels_list, fontsize=lbl_size)
+        else:
+            ax.set_yticklabels([])
+            
+        if i in [3, 4, 5]:
+            ax.set_xlabel("Predicted Label", fontsize=12)
+            ax.set_xticklabels(labels_list, fontsize=lbl_size, rotation=90)
+        else:
+            ax.set_xticklabels([])
+            
+    # Add colorbar
+    fig.subplots_adjust(right=0.92)
+    cbar_ax = fig.add_axes([0.94, 0.15, 0.015, 0.7])
+    fig.colorbar(im, cax=cbar_ax)
+    
+    plt.suptitle(f"Confusion Matrix Comparison on {title_dataset}", fontsize=22, fontweight='bold', y=0.96)
+    
+    # Save image
+    output_abs_path = os.path.abspath(output_img)
+    plt.savefig(output_abs_path, dpi=300, bbox_inches='tight')
+    print(f"Saved combined confusion matrix image at: {output_abs_path}")
 
 if __name__ == "__main__":
     main()
