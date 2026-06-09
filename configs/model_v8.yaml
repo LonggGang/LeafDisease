@@ -1,0 +1,6 @@
+task: "detection"               # "classification" or "detection"
+architecture: "yolo_leafnet_v8" # YOLOv8s-based LeafNet architecture
+num_classes: 30                 # Number of classes in PlantDoc
+pretrained: true                # use yolov8s pretrained weights
+input_size: 640                 # image size (square)
+dropout_rate: 0.3               # dropout rate for C2f_BNDropout layer

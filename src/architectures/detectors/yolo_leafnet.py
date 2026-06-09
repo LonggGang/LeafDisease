@@ -119,7 +119,7 @@ class YOLOLeafNetDetector(BaseDetector):
         """
         arch = self.cfg.get("architecture", "yolo_leafnet")
         
-        if arch != "yolo_leafnet":
+        if arch not in ["yolo_leafnet", "yolo_leafnet_v8"]:
             logger.info(f"Building standard YOLO model: {arch}")
             # Ensure model weight file name matches format expected by Ultralytics
             if not (arch.endswith(".yaml") or arch.endswith(".pt")):
@@ -131,9 +131,15 @@ class YOLOLeafNetDetector(BaseDetector):
             model = YOLO(model_str)
             return model
 
-        # Logic for customized yolo_leafnet
+        # Logic for customized yolo_leafnet (v8 or v12s)
         # Read the template yolo_leafnet configuration
-        arch_config_path = "configs/yolo_leafnet.yaml"
+        if arch == "yolo_leafnet_v8":
+            arch_config_path = "configs/yolo_leafnet_v8.yaml"
+            default_weights = "yolov8s.pt"
+        else:
+            arch_config_path = "configs/yolo_leafnet.yaml"
+            default_weights = "yolov12s.pt"
+
         if not os.path.exists(arch_config_path):
             raise FileNotFoundError(f"Base architecture config not found: {arch_config_path}")
 
@@ -155,11 +161,11 @@ class YOLOLeafNetDetector(BaseDetector):
         # Initialize the model structure
         model = YOLO(config_path)
 
-        # Load pretrained weights from yolov12s.pt if requested (prior to replacing layer 8)
+        # Load pretrained weights from yolov12s.pt or yolov8s.pt if requested (prior to replacing layer 8)
         if self.pretrained:
             try:
-                logger.info("Loading pretrained weights from yolov12s.pt...")
-                standard_model = YOLO("yolov12s.pt")
+                logger.info(f"Loading pretrained weights from {default_weights}...")
+                standard_model = YOLO(default_weights)
                 pretrained_dict = standard_model.model.state_dict()
                 
                 # Filter out parameters with size mismatch
@@ -169,10 +175,10 @@ class YOLOLeafNetDetector(BaseDetector):
                     if k in model_dict and v.shape == model_dict[k].shape
                 }
                 model.model.load_state_dict(filtered_dict, strict=False)
-                logger.info("Successfully loaded pretrained yolov12s weights (excluding mismatched head layers).")
+                logger.info(f"Successfully loaded pretrained {default_weights} weights (excluding mismatched head layers).")
             except Exception as e:
                 logger.warning(
-                    f"Could not load pretrained weights from yolov12s.pt: {e}. "
+                    f"Could not load pretrained weights from {default_weights}: {e}. "
                     "Falling back to random weights initialization."
                 )
 

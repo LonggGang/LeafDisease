@@ -100,24 +100,33 @@ class YOLOLeafNetTrainer(BaseTrainer):
         checkpoint_dir = self.cfg_train.get("checkpoint_dir", "checkpoints/")
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+        # Base training arguments
+        train_args = {
+            "data": self.data_path,
+            "epochs": self.cfg_train.get("epochs", 10),
+            "batch": self.cfg_train.get("batch_size", 16),
+            "lr0": self.cfg_train.get("lr", 0.01),
+            "weight_decay": self.cfg_train.get("weight_decay", 0.0005),
+            "optimizer": optimizer,
+            "cos_lr": cos_lr,
+            "patience": self.cfg_train.get("early_stopping_patience", 5),
+            "project": checkpoint_dir,
+            "name": "yolo_leafnet",
+            "device": self.get_device_string(),
+            "exist_ok": True,
+            "val": True,
+            "resume": self.cfg_train.get("resume", False)
+        }
+
+        # Dynamically forward any extra arguments from configs/train.yaml
+        # This allows turning off/on augmentations (e.g. mosaic, mixup, hsv_h) directly from the config
+        for k, v in self.cfg_train.items():
+            if k not in ["data", "epochs", "batch_size", "lr", "scheduler", "early_stopping_patience", "checkpoint_dir", "resume", "log_backend"]:
+                train_args[k] = v
+
         # Call Ultralytics native train method
         # This automatically handles AMP, DFL loss, Box loss, Class loss, checkpointers, and loggers.
-        self.detector.model.train(
-            data=self.data_path,
-            epochs=self.cfg_train.get("epochs", 10),
-            batch=self.cfg_train.get("batch_size", 16),
-            lr0=self.cfg_train.get("lr", 0.01),
-            weight_decay=self.cfg_train.get("weight_decay", 0.0005),
-            optimizer=optimizer,
-            cos_lr=cos_lr,
-            patience=self.cfg_train.get("early_stopping_patience", 5),
-            project=checkpoint_dir,
-            name="yolo_leafnet",
-            device=self.get_device_string(),
-            exist_ok=True,
-            val=True,
-            resume=self.cfg_train.get("resume", False)
-        )
+        self.detector.model.train(**train_args)
         
         logger.info("Training process completed successfully.")
 

@@ -59,6 +59,9 @@ class YOLOLeafNetEvaluator(BaseEvaluator):
         complexity = self.detector.get_complexity()
         
         metrics = {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
             "mAP50": 0.0,
             "mAP50_95": 0.0,
             "preprocess_ms": 0.0,
@@ -72,6 +75,13 @@ class YOLOLeafNetEvaluator(BaseEvaluator):
             # Ultralytics results.results_dict contains metrics keys:
             # metrics/precision(B), metrics/recall(B), metrics/mAP50(B), metrics/mAP50-95(B)
             res_dict = results.results_dict
+            precision = float(res_dict.get("metrics/precision(B)", 0.0))
+            recall = float(res_dict.get("metrics/recall(B)", 0.0))
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+            
+            metrics["precision"] = precision
+            metrics["recall"] = recall
+            metrics["f1"] = f1
             metrics["mAP50"] = float(res_dict.get("metrics/mAP50(B)", 0.0))
             metrics["mAP50_95"] = float(res_dict.get("metrics/mAP50-95(B)", 0.0))
             
