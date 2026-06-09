@@ -9,8 +9,10 @@ from google import genai
 import time
 import threading
 # 🔴 DÁN API KEY CỦA BẠN VÀO ĐÂY
-GEMINI_API_KEY = "AQ.Ab8RN6JoU5z58TdoptyrDZVsdGwHvmm6A4RqTsrxw0P6jnv6PA"
+#GEMINI_API_KEY = "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"
+from groq import Groq
 
+# Khởi tạo Client (Nhớ nạp GROQ_API_KEY vào môi trường hoặc dán trực tiếp)
 class PlantDiseaseDetectorApp(ctk.CTk):
     def __init__(self):
         ctk.set_appearance_mode("light")
@@ -24,9 +26,9 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         # Load YOLOv12 model
         self.model = YOLO("best_od_yolov12s_plantdoc.pt") 
         
-        # Initialize Gemini AI Client
+        # Initialize Groq AI Client
         try:
-            self.ai_client = genai.Client(api_key=GEMINI_API_KEY)
+            self.ai_client = Groq(api_key="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")
         except Exception as e:
             print(f"Gemini Client Initialization Error: {e}")
 
@@ -92,29 +94,27 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         prompt = f"""
         Bạn là một chuyên gia hàng đầu về bệnh học thực vật và nông nghiệp.
         Hệ thống AI vừa phát hiện ra một chiếc lá bị bệnh có tên tiếng Anh là: '{disease_name_en}'.
-        Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt gồm 3 phần rõ ràng, viết như một bài báo cáo chẩn đoán bệnh cho người nông dân bằng tiếng Việt, không có markdown hay ký tự đặc biệt nào, chỉ có văn bản thuần túy, với nội dung như sau:
+        Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không có markdown gồm 3 phần rõ ràng, viết như một bài báo cáo chẩn đoán bệnh cho người nông dân bằng tiếng Việt, không có markdown hay ký tự đặc biệt nào, chỉ có văn bản thuần túy, với nội dung như sau:
         1. TÊN BỆNH: Dịch sang tiếng Việt và giải thích ngắn gọn về bệnh này.
         2. NGUYÊN NHÂN: Giải thích ngắn gọn tác nhân (vi khuẩn/nấm/môi trường) gây ra bệnh này.
         3. BIỆN PHÁP XỬ LÝ: Đưa ra 3-4 hành động thực tế, cụ thể để cứu cây và phòng ngừa lan rộng.
         """
         try:
-                # Gọi API Gemini
-            response = self.ai_client.models.generate_content(
-                model='gemini-3.1-flash-lite', 
-                contents=prompt,
+            # Gọi API của Groq
+            chat_completion = self.ai_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model="llama-3.1-8b-instant", # Hoặc "qwen/qwen3-32b"
+                temperature=0.3, # Để AI trả lời nhất quán theo khung
             )
-                # Nếu thành công thì trả về kết quả ngay lập tức và thoát hàm
-            return response.text  
+            return chat_completion.choices[0].message.content
+            
         except Exception as e:
-            err_msg = str(e)
-                #print(f"[Lần thử {attempt + 1}/3] Thất bại do: {err_msg}")
-                
-                # Nếu chưa phải lần thử cuối cùng (lần 1 và 2), app sẽ ngủ 2 giây rồi chạy tiếp vòng lặp để thử lại
-                
-                # Nếu đã thử cả 3 lần mà vẫn lỗi thì mới trả về thông báo lỗi cuối cùng cho giao diện
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                return "⏳ [Quota Error]: Vui lòng đợi 10 giây và thử lại.\n\n👉 Khuyến nghị chung: Cắt tỉa bớt lá bệnh để tránh lây lan và hạn chế tưới nước trực tiếp lên lá vào ban đêm."
-            return f"❌ Lỗi kết nối.\n\n👉 Khuyến nghị chung: Cắt tỉa bớt lá bệnh để tránh lây lan và hạn chế tưới nước trực tiếp lên lá vào ban đêm."
+            return f"❌ Lỗi kết nối"
 
     def upload_image(self):
         """Hàm xử lý khi người dùng chọn ảnh hành động 1"""
@@ -160,7 +160,12 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         ctk_img_pred = ctk.CTkImage(light_image=img_pred_resized, dark_image=img_pred_resized, size=(420, 320))
         
         # Đẩy ảnh kết quả bounding box lên giao diện luôn
-        self.lbl_image_pred.configure(image=ctk_img_pred, text="")
+        def update_pred_image_ui():
+            ctk_img_pred = ctk.CTkImage(light_image=img_pred_resized, dark_image=img_pred_resized, size=(420, 320))
+            self.lbl_image_pred.configure(image=ctk_img_pred, text="")
+        
+        self.after(0, update_pred_image_ui)
+        #self.lbl_image_pred.configure(image=ctk_img_pred, text="")
 
         # 2. Logic xử lý văn bản theo từng giai đoạn
         boxes = results[0].boxes
