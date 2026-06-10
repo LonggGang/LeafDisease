@@ -24,13 +24,18 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         self.selected_file_path = None  # Biến lưu đường dẫn ảnh khi bấm nút Upload
 
         # Load YOLOv12 model
-        self.model = YOLO("best_od_yolov12s_plantdoc.pt") 
+        self.model = YOLO("src/app/best_od_yolov12s_plantdoc.pt") 
         
-        # Initialize Groq AI Client
+        # Initialize Groq AI Client (retrieved from environment variable GROQ_API_KEY)
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            print("Warning: GROQ_API_KEY environment variable is not set.")
+            
         try:
-            self.ai_client = Groq(api_key="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")
+            self.ai_client = Groq(api_key=api_key) if api_key else None
         except Exception as e:
-            print(f"Gemini Client Initialization Error: {e}")
+            print(f"Groq Client Initialization Error: {e}")
+            self.ai_client = None
 
         # --- UI LAYOUT ---
         self.title_label = ctk.CTkLabel(self, text="🌱 AI LEAF DISEASE DETECTION AND DIAGNOSIS", font=ctk.CTkFont(size=22, weight="bold"))
@@ -90,7 +95,10 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         self.txt_details.configure(state="disabled")
 
     def ask_gemini_about_disease(self, disease_name_en):
-        """Asynchronous execution bridge to fetch text from Gemini API client"""
+        """Asynchronous execution bridge to fetch text from Groq API client"""
+        if not self.ai_client:
+            return "❌ Lỗi: Biến môi trường GROQ_API_KEY chưa được cấu hình. Vui lòng thiết lập biến môi trường này để sử dụng tính năng Chẩn đoán AI chi tiết."
+            
         prompt = f"""
         Bạn là một chuyên gia hàng đầu về bệnh học thực vật và nông nghiệp.
         Hệ thống AI vừa phát hiện ra một chiếc lá bị bệnh có tên tiếng Anh là: '{disease_name_en}'.
@@ -114,7 +122,7 @@ class PlantDiseaseDetectorApp(ctk.CTk):
             return chat_completion.choices[0].message.content
             
         except Exception as e:
-            return f"❌ Lỗi kết nối"
+            return f"❌ Lỗi kết nối: {e}"
 
     def upload_image(self):
         """Hàm xử lý khi người dùng chọn ảnh hành động 1"""
