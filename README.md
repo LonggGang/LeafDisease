@@ -40,16 +40,16 @@ pip install -r requirements.txt
 
 Để chạy huấn luyện và đánh giá, vui lòng tải các tập dữ liệu tương ứng về máy và điền đường dẫn tuyệt đối hoặc tương đối vào các cấu hình dưới đây:
 
-1. **PlantDoc Dataset (Dùng cho Object Detection - YOLOv12s/YOLOv8)**:
-   * Đường dẫn: `__________________________________________________`
+1. **PlantDoc Dataset**:
+   * Đường dẫn: [PlantDoc Dataset on Kaggle](https://www.kaggle.com/datasets/andresmgs/plantdec)
    * *Mô tả: Chứa thư mục `images/` và `labels/` cho ảnh gốc chưa crop.*
 
-2. **PlantVillage Dataset (Dùng cho Classification - CNN/V2PlantNet)**:
-   * Đường dẫn: `__________________________________________________`
+2. **PlantVillage Dataset**:
+   * Đường dẫn: [PlantVillage Dataset on Kaggle](https://www.kaggle.com/datasets/vipoooool/new-plant-diseases-dataset)
    * *Mô tả: Chứa các ảnh lá cây đã được crop theo các thư mục tương ứng với từng lớp bệnh.*
 
 3. **PlantVillage for Object Detection (Nếu có)**:
-   * Đường dẫn: `__________________________________________________`
+   * Đường dẫn: [PlantVillage for Object Detection on Kaggle](https://www.kaggle.com/datasets/sebastianpalaciob/plantvillage-for-object-detection-yolo)
 
 ---
 
