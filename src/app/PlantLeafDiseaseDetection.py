@@ -22,20 +22,17 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         self.title("Plant Leaf Disease Detection System - YOLOv12s (Group 2 IntroAI)")
         self.geometry("950x850") 
         self.selected_file_path = None  # Biến lưu đường dẫn ảnh khi bấm nút Upload
+        self.ctk_img_orig = None
+        self.ctk_img_pred = None
 
         # Load YOLOv12 model
-        self.model = YOLO("src/app/best_od_yolov12s_plantdoc.pt") 
+        self.model = YOLO("./src/app/best_od_yolov12s_plantdoc.pt") 
         
-        # Initialize Groq AI Client (retrieved from environment variable GROQ_API_KEY)
-        api_key = os.environ.get("GROQ_API_KEY")
-        if not api_key:
-            print("Warning: GROQ_API_KEY environment variable is not set.")
-            
+        # Initialize Groq AI Client
         try:
-            self.ai_client = Groq(api_key=api_key) if api_key else None
+            self.ai_client = Groq(api_key="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")
         except Exception as e:
-            print(f"Groq Client Initialization Error: {e}")
-            self.ai_client = None
+            print(f"Gemini Client Initialization Error: {e}")
 
         # --- UI LAYOUT ---
         self.title_label = ctk.CTkLabel(self, text="🌱 AI LEAF DISEASE DETECTION AND DIAGNOSIS", font=ctk.CTkFont(size=22, weight="bold"))
@@ -95,10 +92,7 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         self.txt_details.configure(state="disabled")
 
     def ask_gemini_about_disease(self, disease_name_en):
-        """Asynchronous execution bridge to fetch text from Groq API client"""
-        if not self.ai_client:
-            return "❌ Lỗi: Biến môi trường GROQ_API_KEY chưa được cấu hình. Vui lòng thiết lập biến môi trường này để sử dụng tính năng Chẩn đoán AI chi tiết."
-            
+        """Asynchronous execution bridge to fetch text from Gemini API client"""
         prompt = f"""
         Bạn là một chuyên gia hàng đầu về bệnh học thực vật và nông nghiệp.
         Hệ thống AI vừa phát hiện ra một chiếc lá bị bệnh có tên tiếng Anh là: '{disease_name_en}'.
@@ -122,7 +116,7 @@ class PlantDiseaseDetectorApp(ctk.CTk):
             return chat_completion.choices[0].message.content
             
         except Exception as e:
-            return f"❌ Lỗi kết nối: {e}"
+            return f"❌ Lỗi kết nối"
 
     def upload_image(self):
         """Hàm xử lý khi người dùng chọn ảnh hành động 1"""
@@ -131,14 +125,19 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         if file_path:
             self.selected_file_path = file_path
             
-            # 1. Hiển thị ảnh gốc lên giao diện trước
+            # 1. Giải phóng ảnh gốc cũ khỏi widget trước để tránh lỗi TclError khi dọn rác
+            self.lbl_image_orig.configure(image=None)
+            self.lbl_image_orig._label.configure(image="")
+
+            # Hiển thị ảnh gốc lên giao diện trước
             img_orig = Image.open(file_path)
             img_orig_resized = img_orig.resize((420, 320))
-            ctk_img_orig = ctk.CTkImage(light_image=img_orig_resized, dark_image=img_orig_resized, size=(420, 320))
-            self.lbl_image_orig.configure(image=ctk_img_orig, text="")
+            self.ctk_img_orig = ctk.CTkImage(light_image=img_orig_resized, dark_image=img_orig_resized, size=(420, 320))
+            self.lbl_image_orig.configure(image=self.ctk_img_orig, text="")
             
             # Xóa ảnh kết quả cũ nếu có
             self.lbl_image_pred.configure(image=None, text="Detection Result")
+            self.lbl_image_pred._label.configure(image="")
 
             # 2. Kích hoạt nút bấm phân tích ảnh
             self.btn_analyze.configure(state="normal")
@@ -165,32 +164,36 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         res_rgb = cv2.cvtColor(res_plotted, cv2.COLOR_BGR2RGB)
         img_pred = Image.fromarray(res_rgb)
         img_pred_resized = img_pred.resize((420, 320))
-        ctk_img_pred = ctk.CTkImage(light_image=img_pred_resized, dark_image=img_pred_resized, size=(420, 320))
         
-        # Đẩy ảnh kết quả bounding box lên giao diện luôn
-        def update_pred_image_ui():
-            ctk_img_pred = ctk.CTkImage(light_image=img_pred_resized, dark_image=img_pred_resized, size=(420, 320))
-            self.lbl_image_pred.configure(image=ctk_img_pred, text="")
-        
-        self.after(0, update_pred_image_ui)
-        #self.lbl_image_pred.configure(image=ctk_img_pred, text="")
+        # Đẩy ảnh kết quả bounding box lên giao diện luôn (Chạy trên Main Thread)
+        def display_prediction():
+            # Giải phóng ảnh kết quả cũ khỏi widget trước để tránh lỗi TclError khi dọn rác
+            self.lbl_image_pred.configure(image=None)
+            self.lbl_image_pred._label.configure(image="")
+
+            self.ctk_img_pred = ctk.CTkImage(light_image=img_pred_resized, dark_image=img_pred_resized, size=(420, 320))
+            self.lbl_image_pred.configure(image=self.ctk_img_pred, text="")
+        self.after(0, display_prediction)
 
         # 2. Logic xử lý văn bản theo từng giai đoạn
         boxes = results[0].boxes
-        self.txt_details.configure(state="normal")
-        self.txt_details.delete("0.0", "end")
 
         if len(boxes) == 0:
-            self.lbl_status.configure(text="Status: No symptoms detected.")
-            self.txt_details.insert("0.0", "No signs of disease found on this leaf sample.")
+            def ui_no_symptoms():
+                self.lbl_status.configure(text="Status: No symptoms detected.")
+                self.txt_details.configure(state="normal")
+                self.txt_details.delete("0.0", "end")
+                self.txt_details.insert("0.0", "No signs of disease found on this leaf sample.")
+                self.txt_details.configure(state="disabled")
+                self.btn_analyze.configure(state="normal")
+                self.btn_upload.configure(state="normal")
+            self.after(0, ui_no_symptoms)
         else:
             cls_id = int(boxes[0].cls[0])
             disease_name_en = self.model.names[cls_id]
             
             # 🎯 BƯỚC ĐỔI: Lấy độ tự tin từ YOLO và quy đổi sang %
             confidence_score = float(boxes[0].conf[0]) * 100
-
-            self.lbl_status.configure(text=f"Status: Consulting Gemini AI for '{disease_name_en}'...")
 
             # 🌟 GIAI ĐOẠN 1: Xuất hiện ngay lập tức thông tin YOLO + dòng chữ chờ
             initial_info = (
@@ -200,13 +203,18 @@ class PlantDiseaseDetectorApp(ctk.CTk):
                 f"--------------------------------------------------\n"
                 f"⏳ CONNECTING TO GEMINI AI FOR DETAILED DIAGNOSIS...\n"
             )
-            self.txt_details.insert("0.0", initial_info)
+            
+            def ui_show_initial():
+                self.lbl_status.configure(text=f"Status: Consulting Gemini AI for '{disease_name_en}'...")
+                self.txt_details.configure(state="normal")
+                self.txt_details.delete("0.0", "end")
+                self.txt_details.insert("0.0", initial_info)
+            self.after(0, ui_show_initial)
 
             # Gọi API Gemini ngầm (App vẫn mượt, người dùng đang ngồi đọc thông tin bên trên)
             gemini_result = self.ask_gemini_about_disease(disease_name_en)
             
             # 🌟 GIAI ĐOẠN 2: Khi có kết quả Gemini, xóa chữ "Đang kết nối..." và chèn báo cáo chính thức vào
-            self.txt_details.delete("0.0", "end")
             final_report = (
                 f"📋 Detection Result (YOLOv12):\n"
                 f"• Disease Name (English): {disease_name_en}\n"
@@ -214,14 +222,16 @@ class PlantDiseaseDetectorApp(ctk.CTk):
                 f"--------------------------------------------------\n"
                 f"{gemini_result}"
             )
-            self.txt_details.insert("0.0", final_report)
-            self.lbl_status.configure(text="Status: Analysis report complete!")
-        
-        self.txt_details.configure(state="disabled")
-        
-        # Mở khóa lại các nút bấm
-        self.btn_analyze.configure(state="normal")
-        self.btn_upload.configure(state="normal")
+            
+            def ui_show_final():
+                self.txt_details.configure(state="normal")
+                self.txt_details.delete("0.0", "end")
+                self.txt_details.insert("0.0", final_report)
+                self.txt_details.configure(state="disabled")
+                self.lbl_status.configure(text="Status: Analysis report complete!")
+                self.btn_analyze.configure(state="normal")
+                self.btn_upload.configure(state="normal")
+            self.after(0, ui_show_final)
 
 if __name__ == "__main__":
     app = PlantDiseaseDetectorApp()

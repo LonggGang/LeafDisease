@@ -2,3 +2,7 @@ ultralytics>=8.0.0
 torchinfo
 gradio
 Pillow
+customtkinter
+groq
+google-genai
+opencv-python
