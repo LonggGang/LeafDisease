@@ -1,30 +1,26 @@
-"""
-Abstract base class for the training loop and validation logic.
-"""
+"""lop cha cho tat ca trainer"""
 import abc
 from typing import Dict, Any
 
 class BaseTrainer(abc.ABC):
-    """
-    Abstract base class for training models.
-    """
+    """lop cha de viet cac lop train sau nay"""
 
     @abc.abstractmethod
     def train_one_epoch(self) -> Dict[str, float]:
-        """Trains the model for a single epoch."""
+        """train model trong mot epoch"""
         pass
 
     @abc.abstractmethod
     def validate(self) -> Dict[str, float]:
-        """Runs the validation loop and computes metrics."""
+        """validate model va tinh metric"""
         pass
 
     @abc.abstractmethod
     def run(self) -> None:
-        """Executes the complete training process."""
+        """chay toan bo qua trinh train"""
         pass
 
     @abc.abstractmethod
     def save_checkpoint(self, path: str) -> None:
-        """Saves the model checkpoint."""
+        """luu checkpoint cua model"""
         pass

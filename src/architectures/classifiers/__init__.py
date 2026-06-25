@@ -1,3 +1,1 @@
-"""
-Classifiers package for image classification architectures.
-"""
+"""khoi tao package classifier"""

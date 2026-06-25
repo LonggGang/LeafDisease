@@ -1,6 +1,4 @@
-"""
-Abstract base class for PyTorch datasets handling plant leaf images.
-"""
+"""lop dataset de load anh cay coi"""
 import abc
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -11,31 +9,26 @@ from torch.utils.data import Dataset
 
 
 class BasePlantDataset(Dataset, abc.ABC):
-    """
-    Abstract base dataset for classification and detection tasks.
-    """
+    """lop cha cho tat ca dataset"""
 
     @abc.abstractmethod
     def __len__(self) -> int:
-        """Returns the total number of samples in the dataset."""
+        """tra ve tong so luong mau"""
         pass
 
     @abc.abstractmethod
     def __getitem__(self, idx: int) -> Any:
-        """Returns a single sample from the dataset."""
+        """lay mot phan tu trong dataset"""
         pass
 
     @abc.abstractmethod
     def load_annotations(self) -> None:
-        """Loads and parses dataset annotations."""
+        """tai va phan tich cac file nhan"""
         pass
 
 
 class PlantDiseaseDataset(BasePlantDataset):
-    """
-    Pure dataset class that handles file I/O and taxonomy unification.
-    Class balancing is deferred to the DataLoader via WeightedRandomSampler.
-    """
+    """dataset thuc te doc thu muc va file nhan"""
     
     def __init__(
         self, 
@@ -43,17 +36,11 @@ class PlantDiseaseDataset(BasePlantDataset):
         transform: Optional[Callable] = None, 
         class_mapping: Optional[Dict[str, str]] = None
     ):
-        """
-        Args:
-            root_dir: Root directory containing class folders.
-            transform: Transformations to apply (from augmentation.py).
-            class_mapping: Dictionary to map irregular folder names to unified names.
-        """
         self.root_dir = Path(root_dir)
         self.transform = transform
         self.class_mapping = class_mapping or {}
         
-        # Internal state
+        # trang thai ben trong
         self.samples: List[Dict[str, Any]] = []
         self.class_to_idx: Dict[str, int] = {}
         self.classes: List[str] = []
@@ -61,15 +48,11 @@ class PlantDiseaseDataset(BasePlantDataset):
         self.load_annotations()
             
     def load_annotations(self) -> None:
-        """
-        Scans root directory, applies syntactic unification, and loads file paths.
-        Assumes directory structure: root_dir/class_name/image.jpg
-        Or, if root_dir contains images/ and labels/ subdirectories, parses YOLO detection split.
-        """
+        """tai va phan tich cac file nhan"""
         if not self.root_dir.exists():
             return
             
-        # Tự động phát hiện cấu trúc YOLO detection dataset
+        # tu dong tim thu muc anh va nhan cua yolo
         images_dir = self.root_dir / "images"
         labels_dir = self.root_dir / "labels"
         if images_dir.is_dir() and labels_dir.is_dir():
@@ -78,7 +61,7 @@ class PlantDiseaseDataset(BasePlantDataset):
             
         raw_classes = sorted([d.name for d in self.root_dir.iterdir() if d.is_dir()])
         
-        # Determine unified unique classes
+        # tim cac lop duy nhat
         unified_set = set()
         for c in raw_classes:
             unified_name = self.class_mapping.get(c, c)
@@ -87,13 +70,13 @@ class PlantDiseaseDataset(BasePlantDataset):
         self.classes = sorted(list(unified_set))
         self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
         
-        # Load sample paths
+        # doc duong dan anh
         for raw_class in raw_classes:
             unified_name = self.class_mapping.get(raw_class, raw_class)
             label_idx = self.class_to_idx[unified_name]
             class_dir = self.root_dir / raw_class
             
-            # Sort paths to ensure deterministic order across different OS file systems
+            # sap xep duong dan cho dong nhat
             img_paths = sorted(class_dir.glob("*.*"))
             for img_path in img_paths:
                 if img_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp']:
@@ -104,8 +87,8 @@ class PlantDiseaseDataset(BasePlantDataset):
                     })
 
     def _load_yolo_annotations(self, images_dir: Path, labels_dir: Path) -> None:
-        """Loads annotations from YOLO detection format split directory."""
-        # Find data.yaml in root_dir or parent directories
+        """tai thong tin annotation kieu yolo"""
+        # tim file data.yaml trong cac thu muc cha
         data_yaml_path = None
         search_dirs = [self.root_dir, self.root_dir.parent, self.root_dir.parent.parent]
         for d in search_dirs:
@@ -128,11 +111,11 @@ class PlantDiseaseDataset(BasePlantDataset):
         if not class_names:
             raise ValueError(f"No class names found in {data_yaml_path}")
             
-        # Convert dict to list if names is a dict
+        # chuyen tu dict sang list neu can
         if isinstance(class_names, dict):
             class_names = [class_names[i] for i in sorted(class_names.keys())]
             
-        # Determine unified unique classes
+        # tim cac lop duy nhat
         unified_set = set()
         for c in class_names:
             unified_name = self.class_mapping.get(c, c)
@@ -141,7 +124,7 @@ class PlantDiseaseDataset(BasePlantDataset):
         self.classes = sorted(list(unified_set))
         self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
         
-        # Load sample paths and their boxes
+        # lay anh va bounding box cua yolo
         img_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
         img_paths = sorted([p for p in images_dir.iterdir() if p.suffix.lower() in img_extensions])
         
@@ -150,7 +133,7 @@ class PlantDiseaseDataset(BasePlantDataset):
             if not lbl_file.exists():
                 continue
                 
-            # Read label annotations
+            # doc noi dung file txt
             try:
                 with open(lbl_file, "r", encoding="utf-8") as lf:
                     lines = lf.readlines()
@@ -178,7 +161,7 @@ class PlantDiseaseDataset(BasePlantDataset):
                 unified_name = self.class_mapping.get(raw_class, raw_class)
                 label_idx = self.class_to_idx[unified_name]
                 
-                # We store the normalized bounding box coordinates to crop in __getitem__
+                # luu toa do de cat anh sau
                 self.samples.append({
                     "path": str(img_path),
                     "box": (x_center, y_center, width, height),
@@ -194,14 +177,14 @@ class PlantDiseaseDataset(BasePlantDataset):
         img_path = sample_info["path"]
         label = sample_info["label_idx"]
         
-        # Load image preserving original channels
+        # doc anh rgb
         try:
             image = Image.open(img_path).convert("RGB")
         except Exception:
-            # Fallback for corrupted images
+            # anh loi thi tao anh den
             image = Image.new("RGB", (256, 256), (0, 0, 0))
             
-        # Crop if a box is specified in sample_info
+        # cat anh neu co thong tin hop
         if "box" in sample_info:
             try:
                 x_center, y_center, width, height = sample_info["box"]
@@ -212,11 +195,11 @@ class PlantDiseaseDataset(BasePlantDataset):
                 x2 = min(img_w, int((x_center + width / 2) * img_w))
                 y2 = min(img_h, int((y_center + height / 2) * img_h))
                 
-                # Only crop if it's a valid crop size
+                # chi cat neu hop du to
                 if (x2 - x1) >= 5 and (y2 - y1) >= 5:
                     image = image.crop((x1, y1, x2, y2))
             except Exception:
-                pass  # Fallback: use original image if crop fails
+                pass  # loi thi giu nguyen anh
             
         if self.transform:
             image = self.transform(image)

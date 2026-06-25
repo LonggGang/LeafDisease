@@ -1,8 +1,4 @@
-"""
-Main entry point for the plant leaf disease detection system.
-Handles training, evaluation, and single-image inference.
-"""
-
+"""file main de chay toan bo duong ong train evaluate predict"""
 import os
 import yaml
 import argparse
@@ -12,7 +8,7 @@ from typing import Dict, Any
 import torch
 from torch.utils.data import DataLoader
 
-# Cấu hình logging
+# cau hinh log
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -24,7 +20,7 @@ logger = logging.getLogger("LeafDiseaseMain")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Loads a YAML configuration file."""
+    """doc file config yaml"""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
@@ -34,11 +30,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 
 def prepare_yolo_dataset_yaml(data_path: str) -> str:
-    """
-    Validates a YOLO dataset configuration file. If the file is missing 'train' or 'val' keys,
-    it dynamically generates a corrected YAML file in a writable temporary directory
-    (scratch or current working directory) with correct paths and returns the path to the new file.
-    """
+    """chuan bi file config dataset yolo"""
     if not data_path:
         return data_path
         
@@ -60,7 +52,7 @@ def prepare_yolo_dataset_yaml(data_path: str) -> str:
     if not yaml_data or not isinstance(yaml_data, dict):
         return data_path
         
-    # Check if 'train' key is missing or 'val' key is missing
+    # kiem tra co thieu train hay val khong
     has_train = "train" in yaml_data
     has_val = "val" in yaml_data or "valid" in yaml_data
     
@@ -68,24 +60,22 @@ def prepare_yolo_dataset_yaml(data_path: str) -> str:
         return data_path
         
     logger.info(f"Dataset YAML {data_path} is missing 'train' or 'val' keys. Creating a temporary corrected configuration...")
-    
     corrected_data = yaml_data.copy()
     
-    # Resolve the directory of the original YAML file as the dataset root path
+    # tim thu muc cha cua file yaml
     yaml_dir = path_obj.parent.resolve()
     
-    # If the YAML doesn't have 'path', set it to the directory containing the YAML file
+    # neu thieu path thi tu them vao
     if "path" not in corrected_data:
         corrected_data["path"] = str(yaml_dir).replace("\\", "/")
         
-    # Determine the train/val directories relative to 'path' (yaml_dir)
+    # tu tim cac thu muc train val
     images_dir = yaml_dir / "images"
-    
     train_rel = "images"
     val_rel = "images"
     
     if images_dir.is_dir():
-        # Check if there are train/val subdirectories inside images/
+        # check trong images co train val khong
         if (images_dir / "train").is_dir():
             train_rel = "images/train"
         if (images_dir / "val").is_dir():
@@ -95,7 +85,7 @@ def prepare_yolo_dataset_yaml(data_path: str) -> str:
         elif (images_dir / "validation").is_dir():
             val_rel = "images/validation"
     else:
-        # Check if train/val directories exist at the same level as the YAML
+        # check ben ngoai
         if (yaml_dir / "train" / "images").is_dir():
             train_rel = "train/images"
         if (yaml_dir / "val" / "images").is_dir():
@@ -108,7 +98,7 @@ def prepare_yolo_dataset_yaml(data_path: str) -> str:
     if not has_val:
         corrected_data["val"] = val_rel
         
-    # Write the corrected YAML to scratch/temp_yolo_dataset.yaml
+    # ghi file config tam thoi
     temp_dir = Path("scratch")
     try:
         os.makedirs(temp_dir, exist_ok=True)
@@ -129,14 +119,14 @@ def prepare_yolo_dataset_yaml(data_path: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parses command line arguments."""
+    """doc cac tham so truyen vao tu terminal"""
     parser = argparse.ArgumentParser(description="Plant Leaf Disease Detection Pipeline")
     parser.add_argument(
         "--mode",
         type=str,
         required=True,
         choices=["train", "eval", "predict", "crop"],
-        help="Pipeline execution mode: 'train', 'eval' (evaluate on test set), 'predict' (single image inference), or 'crop' (to crop YOLO dataset for classification)"
+        help="Pipeline execution mode: 'train', 'eval', 'predict', or 'crop'"
     )
     parser.add_argument(
         "--model_cfg",
@@ -160,39 +150,39 @@ def parse_args() -> argparse.Namespace:
         "--data",
         type=str,
         default=None,
-        help="Path to the standard YOLO dataset.yaml config file (overrides train config)"
+        help="Path to the standard YOLO dataset.yaml config file"
     )
     parser.add_argument(
         "--image_path",
         type=str,
         default=None,
-        help="Path to the target image file for single-image prediction (required in 'predict' mode)"
+        help="Path to the target image file for single-image prediction"
     )
     parser.add_argument(
         "--checkpoint",
         type=str,
         default=None,
-        help="Path to the model checkpoint file (.pth) to load for evaluation or prediction"
+        help="Path to the model checkpoint file (.pth) to load"
     )
     parser.add_argument(
         "--output_dir",
         type=str,
         default=None,
-        help="Output directory path for cropped classification dataset (required in 'crop' mode)"
+        help="Output directory path for cropped classification dataset"
     )
-    # CLI Overrides for model & training
+    # ghi de cac tham so
     parser.add_argument(
         "--task",
         type=str,
         default=None,
         choices=["classification", "detection"],
-        help="Override project task type ('classification' or 'detection')"
+        help="Override project task type"
     )
     parser.add_argument(
         "--architecture",
         type=str,
         default=None,
-        help="Override model architecture (e.g. yolov8n, yolov8s, yolo_leafnet)"
+        help="Override model architecture"
     )
     parser.add_argument(
         "--num_classes",
@@ -204,13 +194,13 @@ def parse_args() -> argparse.Namespace:
         "--pretrained",
         type=str,
         default=None,
-        help="Override pretrained flag ('true' or 'false')"
+        help="Override pretrained flag"
     )
     parser.add_argument(
         "--input_size",
         type=int,
         default=None,
-        help="Override model input image size (imgsz)"
+        help="Override model input image size"
     )
     parser.add_argument(
         "--epochs",
@@ -234,7 +224,7 @@ def parse_args() -> argparse.Namespace:
         "--optimizer",
         type=str,
         default=None,
-        help="Override optimizer (e.g. AdamW, SGD)"
+        help="Override optimizer"
     )
     parser.add_argument(
         "--checkpoint_dir",
@@ -246,7 +236,7 @@ def parse_args() -> argparse.Namespace:
         "--unfreeze_epoch",
         type=int,
         default=None,
-        help="Epoch at which to unfreeze the model backbone (e.g. 5)"
+        help="Epoch at which to unfreeze the model backbone"
     )
     parser.add_argument(
         "--unfreeze_layers",
@@ -258,44 +248,45 @@ def parse_args() -> argparse.Namespace:
         "--unfreeze_lr",
         type=float,
         default=None,
-        help="Learning rate for the unfrozen backbone parameters"
+        help="Learning rate for the unfrozen backbone"
     )
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume training from the checkpoint specified by --checkpoint"
+        help="Resume training from the checkpoint"
     )
     parser.add_argument(
         "--split",
         type=str,
         default="val",
         choices=["train", "val", "valid", "test"],
-        help="Dataset split to evaluate on (default: 'val')"
+        help="Dataset split to evaluate on"
     )
     return parser.parse_args()
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
-    # Handle crop mode directly before loading configs
+    """chay tung mode theo tham so truyen vao"""
+    # neu la mode cat anh thi lam luon
     if args.mode == "crop":
         if not args.data:
             raise ValueError("You must specify --data (path to data.yaml) in crop mode.")
         if not args.output_dir:
             raise ValueError("You must specify --output_dir (output path for cropped dataset) in crop mode.")
         
-        # Preprocess dataset YAML
+        # chuan bi file yaml
         args.data = prepare_yolo_dataset_yaml(args.data)
         logger.info(f"Starting dataset cropping: source={args.data}, target={args.output_dir}")
         from src.dataprocessing.crop_dataset import crop_yolo_dataset
         crop_yolo_dataset(args.data, args.output_dir)
         return
 
-    # 1. Load configurations
+    # 1. doc config
     cfg_model = load_config(args.model_cfg)
     cfg_train = load_config(args.train_cfg)
     cfg_aug = load_config(args.augment_cfg)
 
-    # Apply CLI overrides to model and training configs
+    # ap dung ghi de tu cli
     if args.task:
         cfg_model["task"] = args.task
     if args.architecture:
@@ -326,11 +317,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
     if args.resume:
         cfg_train["resume"] = True
 
-    # Đảm bảo thư mục lưu checkpoint tồn tại
+    # tao folder checkpoint
     checkpoint_dir = cfg_train.get("checkpoint_dir", "checkpoints/")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # 2. Xử lý logic theo chế độ chạy (Mode)
+    # 2. chay theo mode
     task = cfg_model.get("task", "classification")
 
     if task == "detection":
@@ -444,7 +435,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     elif task == "classification":
         data_path = prepare_yolo_dataset_yaml(args.data or cfg_train.get("data", "data/"))
-        # If a dataset YAML file is passed, extract the root directory path
+        # neu la file yaml thi lay path goc
         if data_path.endswith(".yaml") or data_path.endswith(".yml"):
             try:
                 import yaml
@@ -474,7 +465,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 else:
                     state_dict = checkpoint_data
                 
-                # Tự động loại bỏ layer classifier cuối cùng nếu số lượng class khác nhau
+                # tu xoa lop cuoi neu so lop khac nhau
                 if "classifier.weight" in state_dict:
                     ckpt_classes = state_dict["classifier.weight"].shape[0]
                     model_classes = model.classifier.weight.shape[0]

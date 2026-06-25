@@ -1,6 +1,4 @@
-"""
-Training package containing trainers and evaluators.
-"""
+"""khoi tao package training"""
 from src.training.trainer import BaseTrainer
 from src.training.evaluator import BaseEvaluator
 from src.training.yolo_trainer import YOLOLeafNetTrainer

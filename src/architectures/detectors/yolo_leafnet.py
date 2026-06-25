@@ -1,7 +1,4 @@
-"""
-YOLO-LeafNet detector implementation.
-Inherits from BaseDetector and encapsulates the customized YOLOv8s model.
-"""
+"""detector yolo de phat hien benh la"""
 import os
 import time
 import yaml
@@ -22,7 +19,7 @@ try:
     ULTRALYTICS_AVAILABLE = True
 except ImportError:
     ULTRALYTICS_AVAILABLE = False
-    C2f = nn.Module  # fallback stub for definition
+    C2f = nn.Module
     A2C2f = nn.Module
 
 from src.architectures.detectors.base_detector import BaseDetector
@@ -31,9 +28,7 @@ logger = logging.getLogger("YOLOLeafNet")
 
 
 class C2f_BNDropout(nn.Module):
-    """
-    Custom C2f block appended with Batch Normalization and Dropout.
-    """
+    """khoi c2f kem theo batch norm va dropout"""
     def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, p: float = 0.5, g: int = 1, e: float = 0.5):
         super().__init__()
         if not ULTRALYTICS_AVAILABLE:
@@ -50,9 +45,7 @@ class C2f_BNDropout(nn.Module):
 
 
 class A2C2f_BNDropout(nn.Module):
-    """
-    Custom A2C2f block appended with Batch Normalization and Dropout.
-    """
+    """khoi a2c2f kem theo batch norm va dropout"""
     def __init__(self, c1: int, c2: int, n: int = 1, a2: bool = True, area: int = 1, residual: bool = False, mlp_ratio: float = 2.0, e: float = 0.5, g: int = 1, shortcut: bool = True, p: float = 0.5):
         super().__init__()
         if not ULTRALYTICS_AVAILABLE:
@@ -69,21 +62,9 @@ class A2C2f_BNDropout(nn.Module):
 
 
 class YOLOLeafNetDetector(BaseDetector):
-    """
-    YOLO-LeafNet Object Detector.
-    Wraps the Ultralytics YOLOv8 library and modifies the backbone
-    to include a Batch Normalization and a Dropout layer before SPPF.
-    """
+    """lop phat hien doi tuong yolo leafnet"""
 
     def __init__(self, cfg: Dict[str, Any]):
-        """
-        Args:
-            cfg: Configuration dictionary containing:
-                - num_classes: int
-                - input_size: int
-                - pretrained: bool
-                - dropout_rate: float
-        """
         super().__init__()
         
         if not ULTRALYTICS_AVAILABLE:
@@ -98,32 +79,27 @@ class YOLOLeafNetDetector(BaseDetector):
         self.pretrained = cfg.get("pretrained", True)
         self.dropout_rate = cfg.get("dropout_rate", 0.5)
 
-        # 1. Register custom module in ultralytics tasks namespace (optional backup)
+        # dang ky module tu dinh nghia
         self._register_custom_modules()
 
-        # 2. Build the YOLO model structure
+        # dung model yolo
         self.model = self._build_yolo_model()
 
     def _register_custom_modules(self) -> None:
-        """Registers C2f_BNDropout and A2C2f_BNDropout in ultralytics tasks namespace."""
+        """dang ky module vao ultralytics"""
         logger.info("Registering custom C2f_BNDropout and A2C2f_BNDropout modules in ultralytics tasks namespace.")
         ultralytics.nn.tasks.C2f_BNDropout = C2f_BNDropout
         ultralytics.nn.tasks.A2C2f_BNDropout = A2C2f_BNDropout
 
     def _build_yolo_model(self) -> YOLO:
-        """
-        Dynamically configures and builds the YOLOv12s model.
-        If architecture is 'yolo_leafnet', it builds a customized YOLOv12s backbone
-        and injects custom A2C2f_BNDropout at layer 8.
-        Otherwise, it instantiates standard YOLO models (e.g., yolov12s, yolov8s, yolov8n).
-        """
+        """tao model yolo tu config"""
         arch = self.cfg.get("architecture", "yolo_leafnet")
         
         if arch not in ["yolo_leafnet", "yolo_leafnet_v8"]:
             logger.info(f"Building standard YOLO model: {arch}")
-            # Ensure model weight file name matches format expected by Ultralytics
+            # sua lai ten file weights
             if not (arch.endswith(".yaml") or arch.endswith(".pt")):
-                # Check if we should load pretrained or random weights config
+                # check load weights nao
                 model_str = f"{arch}.pt" if self.pretrained else f"{arch}.yaml"
             else:
                 model_str = arch
@@ -131,8 +107,8 @@ class YOLOLeafNetDetector(BaseDetector):
             model = YOLO(model_str)
             return model
 
-        # Logic for customized yolo_leafnet (v8 or v12s)
-        # Read the template yolo_leafnet configuration
+        # logic cho yolo leafnet tu dinh nghia
+        # doc config co san
         if arch == "yolo_leafnet_v8":
             arch_config_path = "configs/yolo_leafnet_v8.yaml"
             default_weights = "yolov8s.pt"
@@ -146,10 +122,10 @@ class YOLOLeafNetDetector(BaseDetector):
         with open(arch_config_path, "r", encoding="utf-8") as f:
             yolo_cfg = yaml.safe_load(f)
 
-        # Override class count
+        # ghi de so class
         yolo_cfg["nc"] = self.num_classes
 
-        # Create checkpoints dir if not exists
+        # tao folder checkpoints
         os.makedirs("checkpoints", exist_ok=True)
         config_path = "checkpoints/yolo_leafnet_config.yaml"
         
@@ -158,17 +134,17 @@ class YOLOLeafNetDetector(BaseDetector):
             
         logger.info(f"Wrote configuration to {config_path}")
 
-        # Initialize the model structure
+        # khoi tao model
         model = YOLO(config_path)
 
-        # Load pretrained weights from yolov12s.pt or yolov8s.pt if requested (prior to replacing layer 8)
+        # load weights pretrained neu can
         if self.pretrained:
             try:
                 logger.info(f"Loading pretrained weights from {default_weights}...")
                 standard_model = YOLO(default_weights)
                 pretrained_dict = standard_model.model.state_dict()
                 
-                # Filter out parameters with size mismatch
+                # loc parameters bi lech size
                 model_dict = model.model.state_dict()
                 filtered_dict = {
                     k: v for k, v in pretrained_dict.items()
@@ -182,21 +158,21 @@ class YOLOLeafNetDetector(BaseDetector):
                     "Falling back to random weights initialization."
                 )
 
-        # Now, replace backbone layer 8 with our custom layer in PyTorch model
+        # thay the layer 8 bang khoi tu dinh nghia
         standard_layer = model.model.model[8]
         
-        # Check standard_layer type
+        # kiem tra kieu layer
         is_a2c2f = False
         if hasattr(standard_layer, "cv1") and hasattr(standard_layer, "cv2") and hasattr(standard_layer, "m"):
             c1 = standard_layer.cv1.conv.in_channels
             c2 = standard_layer.cv2.conv.out_channels
             n = len(standard_layer.m)
             
-            # Identify if it is A2C2f
+            # kiem tra co phai a2c2f khong
             is_a2c2f = isinstance(standard_layer.m[0], nn.Sequential) if len(standard_layer.m) > 0 else False
             
             if is_a2c2f:
-                # Extract A2C2f parameters
+                # lay cac tham so cua a2c2f
                 first_ablock = standard_layer.m[0][0]
                 area = first_ablock.attn.area
                 mlp_ratio = float(first_ablock.mlp[0].conv.out_channels) / first_ablock.mlp[0].conv.in_channels
@@ -209,14 +185,14 @@ class YOLOLeafNetDetector(BaseDetector):
                 )
                 custom_layer_type = "src.architectures.detectors.yolo_leafnet.A2C2f_BNDropout"
             else:
-                # fallback/backward compatibility with C2f if someone passes YOLOv8 structure
+                # backup neu la c2f
                 shortcut = standard_layer.m[0].add if len(standard_layer.m) > 0 else False
                 custom_layer = C2f_BNDropout(c1, c2, n=n, shortcut=shortcut, p=self.dropout_rate)
                 custom_layer_type = "src.architectures.detectors.yolo_leafnet.C2f_BNDropout"
         else:
             raise ValueError(f"Unexpected module type for layer 8: {type(standard_layer)}")
 
-        # Transfer pretrained weights from standard module to our nested module
+        # copy weights tu module cu sang module moi
         if self.pretrained:
             try:
                 if is_a2c2f:
@@ -228,46 +204,37 @@ class YOLOLeafNetDetector(BaseDetector):
             except Exception as e:
                 logger.warning(f"Could not transfer weights for layer 8: {e}")
                 
-        # Copy index and metadata properties required by the parser
+        # copy metadata cho parser cua yolo
         custom_layer.i = standard_layer.i
         custom_layer.f = standard_layer.f
         custom_layer.type = custom_layer_type
         
-        # Replace the module in PyTorch DetectionModel's Sequential container
+        # thay the module vao model
         model.model.model[8] = custom_layer
         logger.info(f"Successfully injected custom layer at backbone layer 8.")
 
         return model
 
     def forward(self, x: torch.Tensor) -> Any:
-        """Standard PyTorch forward pass."""
+        """chay forward qua mang neural"""
         return self.model.model(x)
 
     def apply_nms(self, predictions: Any, conf_threshold: float = 0.25, iou_threshold: float = 0.45) -> Any:
-        """Applies Non-Maximum Suppression to filter bounding boxes."""
+        """ap dung nms de loc hop"""
         return non_max_suppression(predictions, conf_thres=conf_threshold, iou_thres=iou_threshold)
 
     def decode_boxes(self, raw_boxes: Any) -> Any:
-        """Decodes model-specific box outputs from xywh to xyxy format."""
+        """chuyen hop tu xywh sang xyxy"""
         return xywh2xyxy(raw_boxes)
 
     def filter_by_confidence(self, boxes: Any, conf_threshold: float) -> Any:
-        """Filters out boxes below the given confidence threshold."""
+        """loc cac hop duoi nguong tin cay"""
         if isinstance(boxes, torch.Tensor) and boxes.ndim == 2:
             return boxes[boxes[:, 4] >= conf_threshold]
         return boxes
 
     def predict(self, image_path: str) -> Dict[str, Any]:
-        """
-        End-to-end inference from a raw image file path.
-        Returns:
-            {
-                "label": str,
-                "confidence": float,
-                "boxes": list[dict],
-                "inference_ms": float
-            }
-        """
+        """du doan anh tu duong dan"""
         start_time = time.time()
         
         results = self.model.predict(
@@ -292,7 +259,7 @@ class YOLOLeafNetDetector(BaseDetector):
         
         if result.boxes is not None:
             for box in result.boxes:
-                xyxy = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
+                xyxy = box.xyxy[0].tolist()
                 conf = float(box.conf[0])
                 cls_id = int(box.cls[0])
                 cls_name = self.model.names.get(cls_id, f"class_{cls_id}")
@@ -324,14 +291,7 @@ class YOLOLeafNetDetector(BaseDetector):
         }
 
     def get_complexity(self) -> Dict[str, float]:
-        """
-        Returns model complexity.
-        Returns:
-            {
-                "params_M": float,
-                "flops_G": float
-            }
-        """
+        """lay do phuc tap cua model"""
         params_M = sum(p.numel() for p in self.model.model.parameters()) / 1e6
 
         flops_G = 0.0

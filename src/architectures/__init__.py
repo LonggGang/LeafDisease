@@ -1,24 +1,14 @@
-"""
-Architectures package containing models and components.
-"""
+"""khoi tao model va component"""
 from typing import Dict, Any
 from src.architectures.base import BaseModel
 
 def build_model(cfg: Dict[str, Any]) -> BaseModel:
-    """
-    Factory function to construct and build neural network architectures.
-    
-    Args:
-        cfg: Model configuration dictionary containing task type, architecture name, etc.
-        
-    Returns:
-        An instance of BaseModel (either a classifier or detector).
-    """
+    """ham khoi tao cac loai model"""
     task = cfg.get("task", "classification")
     arch = cfg.get("architecture", "")
 
     if task == "detection":
-        # Support both customized yolo_leafnet and standard YOLO variants
+        # ho tro yolo cac thu
         if arch == "yolo_leafnet" or "yolo" in arch.lower():
             from src.architectures.detectors.yolo_leafnet import YOLOLeafNetDetector
             return YOLOLeafNetDetector(cfg)

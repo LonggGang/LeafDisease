@@ -1,7 +1,4 @@
-"""
-Concrete implementation of the training loop for YOLO-LeafNet.
-Wraps the Ultralytics YOLO training execution to maintain high performance.
-"""
+"""lop dung de train model yolo leafnet"""
 import os
 import logging
 from typing import Dict, Any, Optional
@@ -14,10 +11,7 @@ logger = logging.getLogger("YOLOLeafNetTrainer")
 
 
 class YOLOLeafNetTrainer(BaseTrainer):
-    """
-    Trainer class for YOLO-LeafNet.
-    Delegates core training execution to the Ultralytics engine.
-    """
+    """lop trainer cho yolo leafnet"""
 
     def __init__(
         self,
@@ -25,16 +19,11 @@ class YOLOLeafNetTrainer(BaseTrainer):
         cfg_train: Dict[str, Any],
         data_path: Optional[str] = None
     ):
-        """
-        Args:
-            detector: An instance of YOLOLeafNetDetector.
-            cfg_train: Training hyperparameters dictionary.
-            data_path: Optional path to dataset.yaml. If not provided, will read from cfg_train.
-        """
+        """khoi tao trainer voi detector va config"""
         self.detector = detector
         self.cfg_train = cfg_train
         
-        # Determine dataset configuration file
+        # xac dinh duong dan file dataset
         self.data_path = data_path or cfg_train.get("data", "data/dataset.yaml")
         if not self.data_path:
             raise ValueError(
@@ -43,16 +32,12 @@ class YOLOLeafNetTrainer(BaseTrainer):
             )
 
     def train_one_epoch(self) -> Dict[str, float]:
-        """
-        Standard PyTorch train one epoch.
-        Note: Ultralytics manages its own internal epoch loop for efficiency.
-        Calling this separately is not recommended as it incurs setup overhead.
-        """
+        """train mot epoch (it khi dung vi ultralytics tu quan ly)"""
         logger.warning(
             "Calling train_one_epoch individually is discouraged with Ultralytics. "
             "Please use run() to execute the full optimized training loop."
         )
-        # Fallback dry-run of a single epoch
+        # chay thu mot epoch de test
         results = self.detector.model.train(
             data=self.data_path,
             epochs=1,
@@ -62,16 +47,14 @@ class YOLOLeafNetTrainer(BaseTrainer):
             device=self.get_device_string(),
             verbose=False
         )
-        # Parse basic metrics if available
+        # doc ket qua metric neu co
         metrics = {}
         if results and hasattr(results, "results_dict"):
             metrics = {k: float(v) for k, v in results.results_dict.items()}
         return metrics
 
     def validate(self) -> Dict[str, float]:
-        """
-        Runs validation and returns performance metrics (mAP, etc.).
-        """
+        """chay validate tinh cac metric map"""
         logger.info("Running validation loop...")
         results = self.detector.model.val(
             data=self.data_path,
@@ -86,21 +69,19 @@ class YOLOLeafNetTrainer(BaseTrainer):
         return metrics
 
     def run(self) -> None:
-        """
-        Runs the full optimized training process.
-        """
+        """chay toan bo chuong trinh training"""
         logger.info("Starting YOLO-LeafNet training process...")
         
-        # Map optimizer names to format expected by Ultralytics
+        # chon optimizer
         optimizer = self.cfg_train.get("optimizer", "AdamW")
         
-        # Determine scheduler settings
+        # thiet lap scheduler
         cos_lr = self.cfg_train.get("scheduler", "cosine") == "cosine"
         
         checkpoint_dir = self.cfg_train.get("checkpoint_dir", "checkpoints/")
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-        # Base training arguments
+        # tham so train co ban
         train_args = {
             "data": self.data_path,
             "epochs": self.cfg_train.get("epochs", 10),
@@ -118,28 +99,24 @@ class YOLOLeafNetTrainer(BaseTrainer):
             "resume": self.cfg_train.get("resume", False)
         }
 
-        # Dynamically forward any extra arguments from configs/train.yaml
-        # This allows turning off/on augmentations (e.g. mosaic, mixup, hsv_h) directly from the config
+        # them cac tham so phu tu config
         for k, v in self.cfg_train.items():
             if k not in ["data", "epochs", "batch_size", "lr", "scheduler", "early_stopping_patience", "checkpoint_dir", "resume", "log_backend"]:
                 train_args[k] = v
 
-        # Call Ultralytics native train method
-        # This automatically handles AMP, DFL loss, Box loss, Class loss, checkpointers, and loggers.
+        # goi ham train cua ultralytics
         self.detector.model.train(**train_args)
         
         logger.info("Training process completed successfully.")
 
     def save_checkpoint(self, path: str) -> None:
-        """
-        Saves the model state dict to path.
-        """
+        """luu lai trong so cua model"""
         logger.info(f"Saving checkpoint state dict to {path}")
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         torch.save(self.detector.model.model.state_dict(), path)
 
     def get_device_string(self) -> str:
-        """Helper to get PyTorch device string."""
+        """lay thong tin thiet bi gpu hoac cpu"""
         if torch.cuda.is_available():
-            return "0"  # Use first GPU
+            return "0"  # dung gpu dau tien
         return "cpu"

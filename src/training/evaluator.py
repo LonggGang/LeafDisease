@@ -1,18 +1,11 @@
-"""
-Abstract base class for model evaluation and metrics computation.
-"""
+"""lop cha de danh gia model"""
 import abc
 from typing import Dict, Any
 
 class BaseEvaluator(abc.ABC):
-    """
-    Abstract base class for evaluating models.
-    """
+    """lop cha de viet cac lop evaluate sau nay"""
 
     @abc.abstractmethod
     def evaluate(self) -> Dict[str, Any]:
-        """
-        Computes all evaluation metrics including accuracy/mAP, FPS, and FLOPs.
-        Returns a metrics dictionary.
-        """
+        """tinh toan tat ca cac metric danh gia"""
         pass

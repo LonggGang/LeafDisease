@@ -15,7 +15,7 @@ class PlantDiseaseDetectorApp(ctk.CTk):
         ctk.set_default_color_theme("green")    
         super().__init__()
 
-        # --- TỪ ĐIỂN NGÔN NGỮ ---
+        # tu dien ngon ngu
         self.current_lang = "EN"
         self.translations = {
             "EN": {
@@ -78,18 +78,18 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         self.ctk_img_orig = None
         self.ctk_img_pred = None
 
-        # Load YOLOv12 model
+        # load model yolo
         current_dir = os.path.dirname(os.path.abspath(__file__))
         model_path = os.path.join(current_dir, "best_od_yolov12s_plantdoc.pt")
         self.model = YOLO(model_path) 
         
-        # Initialize Groq AI Client
+        # khoi tao client groq ai
         try:
             self.ai_client = Groq(api_key="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")
         except Exception as e:
             print(f"AI Client Initialization Error: {e}")
 
-        # --- NÚT CHỌN NGÔN NGỮ ---
+        # nut chon ngon ngu
         self.frame_lang = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_lang.pack(anchor="ne", padx=20, pady=(10, 0))
         
@@ -97,11 +97,11 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         self.lang_selector.set("EN")
         self.lang_selector.pack()
 
-        # --- UI LAYOUT ---
+        # layout giao dien
         self.title_label = ctk.CTkLabel(self, text=self.translations[self.current_lang]["main_title"], font=ctk.CTkFont(size=22, weight="bold"))
         self.title_label.pack(pady=5)
 
-        # Image Frames
+        # khung anh
         self.frame_images = ctk.CTkFrame(self, fg_color="#D2E7D6")
         self.frame_images.pack(fill="both", expand=True, padx=20, pady=5)
 
@@ -121,7 +121,7 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         )
         self.lbl_image_pred.pack(side="right", padx=15, expand=True)
 
-        # --- KHU VỰC NÚT BẤM ---
+        # khung nut bam
         self.frame_buttons = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_buttons.pack(pady=15)
 
@@ -131,7 +131,7 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         self.btn_analyze = ctk.CTkButton(self.frame_buttons, text=self.translations[self.current_lang]["btn_analyze"], command=self.start_analysis, font=ctk.CTkFont(size=16), state="disabled", fg_color="#27ae60")
         self.btn_analyze.pack(side="left", padx=10)
 
-        # Bottom Info Frames
+        # khung thong tin ben duoi
         self.frame_bottom = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_bottom.pack(fill="x", padx=20, pady=10)
 
@@ -154,14 +154,14 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         self.txt_details.configure(state="disabled")
 
     def change_language(self, choice):
-        """Cập nhật toàn bộ text trên UI khi người dùng chuyển ngôn ngữ"""
+        """cap nhat ngon ngu tren giao dien"""
         self.current_lang = choice
         t = self.translations[self.current_lang]
         
         self.title(t["window_title"])
         self.title_label.configure(text=t["main_title"])
         
-        # Chỉ cập nhật text nếu chưa có ảnh
+        # chi cap nhat chu neu chua co anh
         if self.ctk_img_orig is None:
             self.lbl_image_orig.configure(text=t["lbl_orig"])
         if self.ctk_img_pred is None:
@@ -170,7 +170,7 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         self.btn_upload.configure(text=t["btn_upload"])
         self.btn_analyze.configure(text=t["btn_analyze"])
         
-        # Reset các text trạng thái nếu hệ thống đang ở trạng thái nhàn rỗi
+        # reset text neu dang ranh
         if self.btn_analyze.cget("state") == "disabled" and self.selected_file_path is None:
             self.lbl_status.configure(text=t["status_ready"])
             self.txt_details.configure(state="normal")
@@ -181,7 +181,7 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
             self.lbl_status.configure(text=t["status_selected"])
 
     def ask_gemini_about_disease(self, disease_name_en):
-        """Gọi API Groq với Prompt theo đúng ngôn ngữ được chọn"""
+        """goi api groq theo dung ngon ngu"""
         prompt = self.translations[self.current_lang]["ai_prompt"].format(disease=disease_name_en)
         
         try:

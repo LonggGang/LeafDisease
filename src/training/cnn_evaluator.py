@@ -1,7 +1,4 @@
-"""
-Concrete implementation of the evaluation pipeline for CNN plant disease classifiers.
-Computes standard classification metrics, latency, and complexity.
-"""
+"""lop dung de evaluate model cnn phan loai"""
 import os
 import logging
 import time
@@ -18,18 +15,10 @@ logger = logging.getLogger("CNNClassifierEvaluator")
 
 
 class CNNClassifierEvaluator(BaseEvaluator):
-    """
-    Evaluator class for PyTorch CNN Classifiers.
-    Runs validation on a given dataset and collects accuracy and latency metrics.
-    """
+    """lop evaluator cho model cnn phan loai"""
 
     def __init__(self, model: nn.Module, data_path: str, split: str = "val"):
-        """
-        Args:
-            model: PyTorch classification model.
-            data_path: Path to dataset folder (containing class folders).
-            split: Dataset split to evaluate on.
-        """
+        """khoi tao evaluator voi model va split datapath"""
         self.model = model
         self.data_path = data_path
         self.split = split
@@ -37,13 +26,13 @@ class CNNClassifierEvaluator(BaseEvaluator):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         
-        # Build dataloader
+        # tao dataloader
         self.dataloader = self._build_dataloader()
         self.criterion = nn.CrossEntropyLoss()
 
     def _build_dataloader(self) -> DataLoader:
-        """Prepares DataLoader for evaluation."""
-        # Determine subset dir
+        """tao dataloader doc du lieu de evaluate"""
+        # xac dinh thu muc du lieu con
         subset_dir = self.data_path
         if self.split in ["val", "test", "train"]:
             candidates = [self.split]
@@ -56,35 +45,25 @@ class CNNClassifierEvaluator(BaseEvaluator):
                     subset_dir = candidate_dir
                     break
 
-        # Build transform
+        # tao phep bien doi anh
         dataset_type = getattr(self.model, "dataset_type", "PlantDoc")
         transform_factory = PlantDiseaseTransform(dataset_type=dataset_type, task="classification")
         val_transform = transform_factory.build_val_transforms()
 
-        # Build dataset
+        # tao dataset
         dataset = PlantDiseaseDataset(subset_dir, transform=val_transform)
         
         return DataLoader(
             dataset,
-            batch_size=1,  # Batch size 1 for exact latency measurement
+            batch_size=1,  # batch size 1 de do thoi gian chuan
             shuffle=False,
             num_workers=0,
             pin_memory=True
         )
 
     def evaluate(self) -> Dict[str, Any]:
-        """
-        Computes accuracy, loss, latency, and complexity metrics.
-        
-        Returns:
-            A dictionary containing:
-                - accuracy: float
-                - val_loss: float
-                - inference_ms: float (average raw forward pass latency per image)
-                - params_M: float (total model parameters in millions)
-                - trainable_params_M: float (trainable model parameters in millions)
-        """
-        import os  # Ensure os is imported inside helper
+        """danh gia model va lay cac thong so thoi gian va dung luong"""
+        import os
         self.model.eval()
         running_loss = 0.0
         correct = 0
@@ -97,7 +76,7 @@ class CNNClassifierEvaluator(BaseEvaluator):
             for images, labels in self.dataloader:
                 images, labels = images.to(self.device), labels.to(self.device)
 
-                # Time the forward pass
+                # do thoi gian chay forward
                 t0 = time.perf_counter()
                 outputs = self.model(images)
                 total_time += (time.perf_counter() - t0)
@@ -113,7 +92,7 @@ class CNNClassifierEvaluator(BaseEvaluator):
         val_loss = running_loss / total if total > 0 else 0.0
         avg_latency_ms = (total_time / total) * 1000.0 if total > 0 else 0.0
 
-        # Get complexity
+        # lay do phuc tap cua model
         complexity = {}
         if hasattr(self.model, "get_complexity"):
             complexity = self.model.get_complexity()

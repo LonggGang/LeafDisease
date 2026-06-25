@@ -89,31 +89,18 @@ Mọi thao tác huấn luyện, đánh giá đều được thực hiện thông
 
 Ứng dụng giao diện (GUI) được viết bằng thư viện `customtkinter` và tích hợp mô hình phát hiện **YOLOv12s LeafNet** cùng chẩn đoán AI bằng **Groq**.
 
-### Bước 1: Thiết lập API Key cho Trợ lý AI (Groq)
-Mô hình chẩn đoán chi tiết bệnh sử dụng Llama 3.1 thông qua Groq Cloud. Bạn cần đăng ký tài khoản miễn phí trên Groq để lấy API Key, sau đó nạp vào biến môi trường hệ thống.
-
-*   **Thiết lập trên Windows (PowerShell)**:
-    ```powershell
-    $env:GROQ_API_KEY="gsk_your_actual_api_key_here"
-    ```
-*   **Thiết lập trên Windows (CMD)**:
-    ```cmd
-    set GROQ_API_KEY=gsk_your_actual_api_key_here
-    ```
-*   **Thiết lập trên Linux/macOS**:
-    ```bash
-    export GROQ_API_KEY="gsk_your_actual_api_key_here"
-    ```
-
-### Bước 2: Chạy ứng dụng
+### Chạy ứng dụng
 Mở môi trường ảo đã cài đặt đầy đủ thư viện và chạy tệp GUI:
 ```powershell
 python src/app/PlantLeafDiseaseDetection.py
 ```
 
-### Bước 3: Sử dụng ứng dụng
+### Hướng dẫn sử dụng
 1. Bấm nút **"Upload Leaf Image"** để chọn ảnh lá cây bị bệnh từ máy tính của bạn.
 2. Bấm nút **"Analyze Disease"** (nút này sẽ sáng lên sau khi tải ảnh).
 3. Hệ thống sẽ:
    * Chạy mô hình **YOLOv12s LeafNet** cục bộ để vẽ hộp bao (Bounding Box) khoanh vùng bệnh trên lá.
    * Gửi thông tin bệnh phát hiện được lên **Groq AI** qua luồng ngầm (threading) để lấy chẩn đoán chi tiết bằng Tiếng Việt gồm: Tên bệnh, Nguyên nhân, Biện pháp xử lý thực tế mà không làm đơ hay giật giao diện.
+
+
+

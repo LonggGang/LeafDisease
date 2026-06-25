@@ -1,2 +1,44 @@
+# Existing rules
 docs/PROJECT_CONTEXT.md
 docs/*
+checkpoints/
+data/
+
+# Machine Learning / YOLO artifacts & weights
+runs/
+*.pt
+*.pth
+*.onnx
+*.weights
+
+# Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Scratch / Temporary workspace files
+scratch/
+
+# LaTeX report folder
+report/
+texput.log

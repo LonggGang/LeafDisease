@@ -1,7 +1,4 @@
-"""
-Utility script to parse a YOLO detection dataset and crop bounding boxes
-to generate a folder-structured classification dataset.
-"""
+"""cat anh tu bounding box de lam dataset phan loai"""
 import os
 import yaml
 import logging
@@ -12,19 +9,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("CropDataset")
 
 def resolve_split_dirs(data_yaml_path: str, split: str):
-    """
-    Finds the images and labels directory for a given split using heuristics.
-    Returns:
-        (images_dir_path, labels_dir_path) or (None, None)
-    """
+    """tim thu muc anh va nhan cua split"""
     yaml_path = Path(data_yaml_path)
     yaml_dir = yaml_path.parent
     
     with open(yaml_path, "r", encoding="utf-8") as f:
         yaml_data = yaml.safe_load(f)
     
-    # 1. Try to get relative path from YAML
-    # Keys might be 'train', 'val', 'test'
+    # 1. lay duong dan tuong doi tu yaml
     rel_path = yaml_data.get(split)
     if not rel_path and split == "valid":
         rel_path = yaml_data.get("val")
@@ -33,20 +25,16 @@ def resolve_split_dirs(data_yaml_path: str, split: str):
         
     candidates = []
     if rel_path:
-        # Candidate 1: relative path from yaml directory
         candidates.append(yaml_dir / rel_path)
-        # Candidate 2: relative path from yaml directory, but ignoring parent navigation if it's nested
         candidates.append(yaml_dir / rel_path.lstrip("../").lstrip("./"))
         
-    # Heuristics based on standard Roboflow/YOLO formats
-    # Candidate 3: yaml_dir / split / images
+    # cac duong dan mac dinh hay gap
     candidates.append(yaml_dir / split / "images")
-    # Candidate 4: yaml_dir / val/images (if split is valid)
     if split in ["val", "valid"]:
         candidates.append(yaml_dir / "val" / "images")
         candidates.append(yaml_dir / "valid" / "images")
         
-    # Check candidates
+    # kiem tra duong dan
     images_dir = None
     for cand in candidates:
         cand_resolved = cand.resolve()
@@ -58,20 +46,16 @@ def resolve_split_dirs(data_yaml_path: str, split: str):
         logger.warning(f"Could not locate images directory for split '{split}'")
         return None, None
         
-    # Locate labels directory corresponding to images directory
-    # Standard YOLO has images/ and labels/ at the same level
+    # lay folder labels tuong ung
     labels_dir = images_dir.parent / "labels"
     if not labels_dir.is_dir():
-        # Fallback: check if labels is in the same folder with images (unlikely but possible)
         labels_dir = images_dir
         
     logger.info(f"Resolved paths for '{split}': images={images_dir}, labels={labels_dir}")
     return images_dir, labels_dir
 
 def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
-    """
-    Parses YOLO annotations and crops bounding boxes to create a classification dataset.
-    """
+    """chay qua tung file nhan va cat anh tuong ung"""
     yaml_path = Path(data_yaml_path)
     if not yaml_path.exists():
         raise FileNotFoundError(f"data.yaml not found at {data_yaml_path}")
@@ -79,12 +63,12 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
     with open(yaml_path, "r", encoding="utf-8") as f:
         yaml_data = yaml.safe_load(f)
         
-    # Get class names
+    # lay ten cac class
     class_names = yaml_data.get("names")
     if not class_names:
         raise ValueError("No class 'names' found in data.yaml")
         
-    # Convert dict to list if names is a dict
+    # chuyen class name sang dang list
     if isinstance(class_names, dict):
         class_names = [class_names[i] for i in sorted(class_names.keys())]
         
@@ -92,7 +76,6 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
     os.makedirs(output_path, exist_ok=True)
     
     splits = ["train", "valid", "test"]
-    
     total_cropped = 0
     
     for split in splits:
@@ -100,25 +83,23 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
         if not img_dir or not lbl_dir:
             continue
             
-        # Create output directories for each class in this split
-        # We standardise the split folder name to 'train' and 'val' for the classification trainer
+        # tao folder luu anh cho tung class
         out_split = "val" if split in ["val", "valid"] else split
         
-        # Load image paths
+        # lay tat ca file anh
         img_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
         img_files = [f for f in img_dir.iterdir() if f.suffix.lower() in img_extensions]
         
         logger.info(f"Processing {len(img_files)} images in '{split}' split...")
-        
         split_cropped = 0
         
         for img_file in img_files:
-            # Find corresponding label file
+            # tim file nhan tuong ung
             lbl_file = lbl_dir / f"{img_file.stem}.txt"
             if not lbl_file.exists():
                 continue
                 
-            # Load image
+            # doc anh
             try:
                 img = Image.open(img_file).convert("RGB")
             except Exception as e:
@@ -127,7 +108,7 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
                 
             img_w, img_h = img.size
             
-            # Read label annotations
+            # doc noi dung file nhan
             with open(lbl_file, "r", encoding="utf-8") as lf:
                 lines = lf.readlines()
                 
@@ -151,10 +132,10 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
                     
                 class_name = class_names[class_idx]
                 
-                # Sanitize class name for folder safety
+                # lam sach ten thu muc
                 class_name_clean = class_name.replace(" ", "_").replace("/", "_")
                 
-                # Convert normalized coordinates to pixel coordinates
+                # tinh toa do pixel thuc te
                 w = width * img_w
                 h = height * img_h
                 x1 = max(0, int((x_center - width / 2) * img_w))
@@ -162,14 +143,14 @@ def crop_yolo_dataset(data_yaml_path: str, output_dir: str):
                 x2 = min(img_w, int((x_center + width / 2) * img_w))
                 y2 = min(img_h, int((y_center + height / 2) * img_h))
                 
-                # Filter out extremely small boxes or invalid coordinates
+                # bo cac hop qua nho
                 if (x2 - x1) < 5 or (y2 - y1) < 5:
                     continue
                     
-                # Crop
+                # cat anh
                 cropped_img = img.crop((x1, y1, x2, y2))
                 
-                # Save
+                # luu anh
                 class_out_dir = output_path / out_split / class_name_clean
                 os.makedirs(class_out_dir, exist_ok=True)
                 

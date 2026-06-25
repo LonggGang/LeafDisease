@@ -1,7 +1,4 @@
-# !pip install thop
-"""
-Architecture: Input -> Conv + BN + ReLU + Depthwise Separable Blcoks -> Global Average Pooling -> Dense -> Dropout -> Classifier
-"""
+"""mang v2plantnet sieu nhe"""
 
 import torch
 import torch.nn as nn
@@ -17,18 +14,14 @@ from typing import Dict, Any, Optional
 from src.architectures.base import BaseModel
 from src.architectures.classifiers.base_classifier import BaseClassifier
 
-"""
-DepthwiseSeparableBlock is a lightweight convolution block that replaces a standard convolution with two operations:
-Depthwise Convolution – applies a separate 3×3 filter to each input channel to extract spatial features.
-Pointwise Convolution (1×1) – combines information across channels and produces the desired number of output channels.
-This design significantly reduces the number of parameters and computations compared to a standard convolution while maintaining good feature extraction capability, making it suitable for lightweight models such as V2PlantNet.
-"""
+
 class DepthwiseSeparableBlock(nn.Module):
+    """khoi depthwise separable conv cho nhe"""
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
 
         self.block = nn.Sequential(
-            # Depthwise
+            # depthwise conv
             nn.Conv2d(
                 in_channels,
                 in_channels,
@@ -41,7 +34,7 @@ class DepthwiseSeparableBlock(nn.Module):
             nn.BatchNorm2d(in_channels),
             nn.ReLU(inplace=True),
 
-            # Pointwise
+            # pointwise conv
             nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -55,7 +48,9 @@ class DepthwiseSeparableBlock(nn.Module):
     def forward(self, x):
         return self.block(x)
 
+
 class V2PlantNet(nn.Module, BaseClassifier):
+    """lop de train va du doan v2plantnet"""
 
     def __init__(self, cfg_or_num_classes: Any = 38, class_map: Optional[Dict[int, str]] = None):
         super().__init__()
@@ -74,7 +69,8 @@ class V2PlantNet(nn.Module, BaseClassifier):
             self.class_map = class_map or {i: f"class_{i}" for i in range(self.num_classes)}
             self.class_names = [self.class_map[i] for i in sorted(self.class_map.keys())]
             self.input_size = 224
-        # Initial layers
+
+        # cac lop khoi dau
         self.stem = nn.Sequential(
             nn.Conv2d(
                 3,
@@ -94,14 +90,14 @@ class V2PlantNet(nn.Module, BaseClassifier):
             )
         )
 
-        # Stage 1
+        # stage 1
         self.stage1 = nn.Sequential(
             DepthwiseSeparableBlock(32, 64, stride=1),
             DepthwiseSeparableBlock(64, 64, stride=1),
             DepthwiseSeparableBlock(64, 64, stride=1),
         )
 
-        # Stage 2
+        # stage 2
         self.stage2 = nn.Sequential(
             DepthwiseSeparableBlock(64, 128, stride=2),
 
@@ -111,7 +107,7 @@ class V2PlantNet(nn.Module, BaseClassifier):
             ]
         )
 
-        # Stage 3
+        # stage 3
         self.stage3 = nn.Sequential(
             DepthwiseSeparableBlock(128, 256, stride=2),
 
@@ -132,25 +128,17 @@ class V2PlantNet(nn.Module, BaseClassifier):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-
         x = self.stem(x)
-
         x = self.stage1(x)
         x = self.stage2(x)
         x = self.stage3(x)
-
         x = self.global_pool(x)
-
         logits = self.classifier(x)
-
         return logits
 
     def postprocess_logits(self, logits: torch.Tensor):
-
         probs = F.softmax(logits, dim=1)
-
         confidence, class_idx = torch.max(probs, dim=1)
-
         return probs, class_idx, confidence
 
     def map_index_to_label(self, class_idx: int) -> str:
@@ -173,14 +161,11 @@ class V2PlantNet(nn.Module, BaseClassifier):
         tensor = transform(image).unsqueeze(0).to(device)
 
         start = time.perf_counter()
-
         with torch.no_grad():
             logits = self.forward(tensor)
-
         inference_ms = (time.perf_counter() - start) * 1000
 
         _, class_idx, confidence = self.postprocess_logits(logits.cpu())
-
         label = self.map_index_to_label(class_idx.item())
 
         return {
@@ -194,24 +179,22 @@ class V2PlantNet(nn.Module, BaseClassifier):
         self.eval()
         device = next(self.parameters()).device
         
-        # Parameter count
+        # dem parameter
         params = sum(
             p.numel()
             for p in self.parameters()
         )
-
         params_M = params / 1_000_000
 
-        # Dummy input
+        # tao du lieu gia
         dummy = torch.randn(1, 3, self.input_size, self.input_size).to(device)
 
-        # FLOPs calculation
+        # tinh flops
         flops, _ = profile(
             self,
             inputs=(dummy,),
             verbose=False
         )
-
         flops_G = flops / 1_000_000_000
 
         return {
@@ -219,16 +202,14 @@ class V2PlantNet(nn.Module, BaseClassifier):
             "flops_G": round(flops_G, 6)
         }
 
+
 def _register_classifier(cfg: Dict[str, Any]) -> V2PlantNet:
-    """
-    Factory helper — gọi từ build_model() trong src/architectures/__init__.py.
-    """
+    """helper dang ky model voi factory"""
     return V2PlantNet(cfg)
 
-"""
-Initialize to get parameters
-"""
+
 if __name__ == "__main__":
+    # chay thu model
     model = V2PlantNet(
         cfg_or_num_classes=38,
         class_map = {

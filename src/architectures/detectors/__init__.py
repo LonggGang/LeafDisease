@@ -1,3 +1,1 @@
-"""
-Detectors package for object detection architectures.
-"""
+"""khoi tao package detector"""
