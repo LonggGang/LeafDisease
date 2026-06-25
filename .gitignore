@@ -39,6 +39,13 @@ Thumbs.db
 # Scratch / Temporary workspace files
 scratch/
 
-# LaTeX report folder
-report/
+# LaTeX report folder (track sources, ignore compiled outputs)
+report/*.aux
+report/*.log
+report/*.pdf
+report/*.fls
+report/*.fdb_latexmk
+report/*.blg
+report/*.bbl
+report/*.out
 texput.log
