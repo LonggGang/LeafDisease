@@ -85,7 +85,7 @@ Hãy viết một đoạn phản hồi ngắn gọn bằng Tiếng Việt không
         
         # khoi tao client groq ai
         try:
-            self.ai_client = Groq(api_key="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")
+            self.ai_client = Groq(api_key="PLACE_YOUR_API_HERE")
         except Exception as e:
             print(f"AI Client Initialization Error: {e}")
 
