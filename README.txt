@@ -12,6 +12,7 @@ Du an nay tich hop phat hien vat the (YOLOv12s LeafNet), phan loai benh (CNN), v
 2. CHAY GIAO DIEN (GUI APP)
 - Chay lenh sau de mo giao dien:
   python src/app/PlantLeafDiseaseDetection.py
+- Nen cai dat lai Groq API key trong code truoc khi chay de khong bi loi.
 
 3. HUONG DAN SU DUNG
 - Bam "Upload Leaf Image" de chon anh la cay bi benh.
